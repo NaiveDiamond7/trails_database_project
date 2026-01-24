@@ -1,3 +1,7 @@
+database.py -> obsługa połączenia z bazą danych
+crud.py -> wykonywanie operacji na bazie danych (create read update delete)
+app.py -> obsługa aplikacji webowej (streamlit UI)
+
 TODO
 
 Co mamy zrobione:
