@@ -22,7 +22,6 @@ def get_schroniska_view():
     return db.execute_query_df(sql)
 
 def add_schronisko_transaction(id_region, nazwa, wysokosc, otwarcie, zamkniecie):
-    # Logika transakcyjna (Punkt -> Schronisko) w bloku PL/SQL
     sql = """
     DECLARE
         v_id NUMBER;
@@ -38,7 +37,7 @@ def add_schronisko_transaction(id_region, nazwa, wysokosc, otwarcie, zamkniecie)
     params = [id_region, nazwa, wysokosc, otwarcie, zamkniecie]
     return db.execute_dml(sql, params)
 
-# --- REZERWACJE (PROCEDURY) ---
+# --- REZERWACJE (PROCEDURY I LOGIKA BIZNESOWA) ---
 def get_users_dict():
     df = db.execute_query_df("SELECT id_uzytkownika, login, nazwisko FROM uzytkownicy")
     return {f"{row['LOGIN']} ({row['NAZWISKO']})": row['ID_UZYTKOWNIKA'] for i, row in df.iterrows()}
@@ -51,19 +50,100 @@ def calculate_cost(id_pokoju, start, end, osoby):
     return db.execute_function("oblicz_koszt_pobytu", oracledb.NUMBER, [id_pokoju, start, end, osoby])
 
 def make_reservation(id_pokoju, id_user, osoby, start, end):
+    """
+    Tworzy rezerwację z PEŁNĄ kontrolą pojemności pokoju w danym terminie.
+    Sprawdza, czy suma osób w tym pokoju w nachodzących datach nie przekracza pojemności.
+    """
+    # 1. Pobierz pojemność całkowitą tego pokoju
+    cap_sql = "SELECT liczba_miejsc_calkowita FROM pokoje WHERE id_pokoju = :1"
+    cap_df = db.execute_query_df(cap_sql, [id_pokoju])
+    
+    if cap_df.empty:
+        return False, "Błąd: Nie znaleziono wybranego pokoju."
+    
+    max_capacity = cap_df.iloc[0]['LICZBA_MIEJSC_CALKOWITA']
+
+    # 2. Oblicz ile miejsc jest już zajętych w tym terminie przez KOGOKOLWIEK
+    # Warunek nakładania się dat: (Start_Istniejąca < End_Nowa) AND (End_Istniejąca > Start_Nowa)
+    overlap_sql = """
+        SELECT COALESCE(SUM(liczba_osob), 0) as zajete
+        FROM rezerwacje 
+        WHERE id_pokoju = :1 
+          AND status_rez != 'anulowana'
+          AND data_rozpoczecia < :2 
+          AND data_zakonczenia > :3
+    """
+    # Parametry: id_pokoju, data_konca_nowej, data_startu_nowej
+    occ_df = db.execute_query_df(overlap_sql, [id_pokoju, end, start])
+    current_occupancy = occ_df.iloc[0]['ZAJETE']
+
+    # 3. Sprawdź czy zmieścimy nowe osoby
+    if current_occupancy + osoby > max_capacity:
+        remaining = max_capacity - current_occupancy
+        if remaining <= 0:
+            return False, f"Pokój jest w pełni zajęty w tym terminie."
+        else:
+            return False, f"Brak wystarczającej liczby miejsc. Wolne: {remaining}, Żądane: {osoby}."
+
+    # 4. Jeśli wszystko OK, wykonaj procedurę
     return db.execute_procedure("dokonaj_rezerwacji", [id_pokoju, id_user, osoby, start, end])
 
 def get_user_reservations(id_user):
+    """Pobiera historię rezerwacji dla konkretnego użytkownika"""
     sql = """
-        SELECT r.id_rezerwacji, s.nazwa as schronisko, p.nr_pokoju, 
+        SELECT r.id_rezerwacji, u.login, u.imie, u.nazwisko, 
+               s.nazwa as schronisko, p.nr_pokoju, r.liczba_osob,
                r.data_rozpoczecia, r.data_zakonczenia, r.status_rez, r.kwota
         FROM rezerwacje r
         JOIN pokoje p ON r.id_pokoju = p.id_pokoju
         JOIN schroniska s ON p.id_schroniska = s.id_schroniska
-        WHERE r.id_uzytkownika = :uid
+        JOIN uzytkownicy u ON r.id_uzytkownika = u.id_uzytkownika
+        WHERE r.id_uzytkownika = :1
         ORDER BY r.id_rezerwacji DESC
     """
     return db.execute_query_df(sql, [id_user])
+
+def get_all_reservations():
+    """Pobiera historię WSZYSTKICH rezerwacji (do widoku globalnego)"""
+    sql = """
+        SELECT r.id_rezerwacji, u.login, u.imie, u.nazwisko, 
+               s.nazwa as schronisko, p.nr_pokoju, r.liczba_osob,
+               r.data_rozpoczecia, r.data_zakonczenia, r.status_rez, r.kwota
+        FROM rezerwacje r
+        JOIN pokoje p ON r.id_pokoju = p.id_pokoju
+        JOIN schroniska s ON p.id_schroniska = s.id_schroniska
+        JOIN uzytkownicy u ON r.id_uzytkownika = u.id_uzytkownika
+        ORDER BY r.id_rezerwacji DESC
+    """
+    return db.execute_query_df(sql)
+
+# W pliku crud.py (sekcja REZERWACJE)
+
+def delete_reservation(id_rezerwacji):
+    """
+    Usuwa rezerwację i przywraca wolne miejsca w pokoju.
+    Używamy bloku PL/SQL, aby zrobić to w jednej transakcji.
+    """
+    sql = """
+    DECLARE
+        v_pokoj NUMBER;
+        v_osob NUMBER;
+    BEGIN
+        -- 1. Pobieramy dane rezerwacji przed usunięciem (używamy zmiennej :1)
+        SELECT id_pokoju, liczba_osob INTO v_pokoj, v_osob
+        FROM rezerwacje WHERE id_rezerwacji = :1;
+
+        -- 2. Usuwamy rezerwację (ponownie używamy tej samej zmiennej :1)
+        DELETE FROM rezerwacje WHERE id_rezerwacji = :1;
+
+        -- 3. Oddajemy miejsca do puli wolnych w pokoju
+        UPDATE pokoje 
+        SET liczba_miejsc_wolnych = liczba_miejsc_wolnych + v_osob
+        WHERE id_pokoju = v_pokoj;
+    END;
+    """
+    # Sterownik podstawi tę jedną wartość w oba miejsca oznaczone jako :1
+    return db.execute_dml(sql, [id_rezerwacji])
 
 # --- SZLAKI ---
 
@@ -96,9 +176,7 @@ def delete_szlak(id_szlaku):
     return db.execute_dml("DELETE FROM szlaki WHERE id_szlaku = :1", [id_szlaku])
 
 # --- POKOJE ---
-
 def get_pokoje_full():
-    """Pobiera pokoje ze szczegółami schroniska do tabeli głównej"""
     sql = """
         SELECT p.id_pokoju, s.nazwa as schronisko, p.nr_pokoju, 
                p.liczba_miejsc_calkowita, p.liczba_miejsc_wolnych, p.cena_za_noc
@@ -109,10 +187,6 @@ def get_pokoje_full():
     return db.execute_query_df(sql)
 
 def update_pokoj(id_pokoju, nowa_cena, nowe_miejsca):
-    """
-    Aktualizuje pokój. 
-    POPRAWKA: Parametr 'nowe_miejsca' jest podany dwa razy, bo w SQL są placeholder-y :2 i :3.
-    """
     sql = """
         UPDATE pokoje 
         SET cena_za_noc = :1, 
@@ -126,12 +200,34 @@ def delete_pokoj(id_pokoju):
     return db.execute_dml("DELETE FROM pokoje WHERE id_pokoju = :1", [id_pokoju])
 
 def add_pokoj(id_schroniska, nr_pokoju, miejsca, cena):
-    """
-    Dodaje nowy pokój.
-    POPRAWKA: Parametr 'miejsca' jest podany dwa razy (dla całkowitych i wolnych).
-    """
     sql = """
         INSERT INTO pokoje (id_schroniska, nr_pokoju, liczba_miejsc_calkowita, liczba_miejsc_wolnych, cena_za_noc)
         VALUES (:1, :2, :3, :4, :5)
     """
     return db.execute_dml(sql, [id_schroniska, nr_pokoju, miejsca, miejsca, cena])
+
+# --- UZYTKOWNICY ---
+def get_users_full():
+    return db.execute_query_df("""
+        SELECT id_uzytkownika, login, haslo, rola, imie, nazwisko, email 
+        FROM uzytkownicy 
+        ORDER BY nazwisko, imie
+    """)
+
+def add_user(login, haslo, rola, imie, nazwisko, email):
+    sql = """
+        INSERT INTO uzytkownicy (login, haslo, rola, imie, nazwisko, email)
+        VALUES (:1, :2, :3, :4, :5, :6)
+    """
+    return db.execute_dml(sql, [login, haslo, rola, imie, nazwisko, email])
+
+def update_user(id_user, login, haslo, rola, imie, nazwisko, email):
+    sql = """
+        UPDATE uzytkownicy 
+        SET login = :1, haslo = :2, rola = :3, imie = :4, nazwisko = :5, email = :6
+        WHERE id_uzytkownika = :7
+    """
+    return db.execute_dml(sql, [login, haslo, rola, imie, nazwisko, email, id_user])
+
+def delete_user(id_user):
+    return db.execute_dml("DELETE FROM uzytkownicy WHERE id_uzytkownika = :1", [id_user])
