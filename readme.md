@@ -25,6 +25,8 @@ Moduł Schroniska:
 Wyświetlanie (Read) z JOINem do regionów.
 Dodawanie (Create) z transakcją (najpierw tabela punkty, potem schroniska).
 Wspomaganie użytkownika (wybór regionu z listy).
+Usuwanie(Delete)
+Edyscja(Udpate)
 
 Moduł Pokoje:
 Dodawanie (Create)
@@ -41,18 +43,10 @@ Wyszukiwanie, w tym po uzytkownikach.
 Wyświetlanie rezerwacji globalnych, z podziałem na uzytkownikow
 
 
+Sekcja schroniska aktualizuje i usuwa rekordy z dwóch tabeli wedle schematu! (połączenie tabel schroniska i punkty)
+
+
 Czego brakuje:
-
-Brak edycji i usuwania Schronisk (Update/Delete):
-Schroniska można tylko dodawać. Jeśli użytkownik zrobi literówkę w nazwie schroniska, nie ma jak jej poprawić w aplikacji.
-
-vvv przeciez to mamy co autor (ja) mial na myśli pisząc to???
-Brak zarządzania Użytkownikami:
-Mamy tabelę uzytkownicy, ale używamy jej tylko do odczytu przy rezerwacji. Nie można dodać nowego użytkownika przez aplikację.
 
 Pozostałe tabele:
 wyposazenia, pokoje_wyposazenie – brak obsługi (przydzielanie wyposażenia do pokoi).
-
-Do sprawdzenia:
-Przy rezerwacji slider wyboru ilości osób ma być dynamiczny i nie dawać opcji wyboru więcej niz maksymalnej ilości osob do pokoju.
-najlepiej jakby to nie był slider tbh.

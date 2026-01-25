@@ -1,9 +1,12 @@
 import oracledb
 import pandas as pd
 import warnings
+import os
 
 warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
 # Wylaczamy ostrzezenia Pandas dotyczace SQLAlchemy, ktore nie sa istotne w tym kontekscie.
+
+os.environ["NLS_LANG"] = "POLISH_POLAND.AL32UTF8"
 
 # Konfiguracja Docker
 DB_CONFIG = {
@@ -40,7 +43,7 @@ def execute_dml(query, params):
         elif "ORA-02292" in error_obj.message:
             return False, "Błąd: Element jest używany w innej tabeli."
         elif "ORA-02290" in error_obj.message:
-            return False, f"Błąd walidacji danych (Check constraint)."
+            return False, f"Błąd walidacji (Check Constraint): {error_obj.message}"
         else:
             return False, f"Błąd bazy: {error_obj.message}"
     except Exception as e:

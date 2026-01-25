@@ -6,10 +6,8 @@ import datetime
 
 def view_regiony():
     st.header("Zarządzanie Regionami")
-    
-    # Czyste wywołanie funkcji z crud.py
+
     df = crud.get_regiony()
-    # ZMIANA: width="stretch" zamiast use_container_width=True
     st.dataframe(df, width="stretch")
 
     with st.expander("Dodaj nowy region"):
@@ -35,36 +33,110 @@ def view_regiony():
                 st.error(msg)
 
 def view_schroniska():
-    st.header("Schroniska")
-    # ZMIANA: width="stretch"
-    st.dataframe(crud.get_schroniska_view(), width="stretch")
-    
-    # Pobieranie regionów do formularza
+    st.header("🏠 Zarządzanie Schroniskami")
+
+    # Pobieranie regionów do formularzy (potrzebne w obu zakładkach)
     reg_df = crud.get_regiony()
     reg_opts = {row['NAZWA']: row['ID_REGIONU'] for i, row in reg_df.iterrows()}
+    # Odwrócona mapa do ustawiania domyślnych wartości w edycji
+    reg_rev = {row['ID_REGIONU']: row['NAZWA'] for i, row in reg_df.iterrows()}
 
-    with st.form("add_schronisko"):
-        col1, col2 = st.columns(2)
-        with col1:
-            nazwa = st.text_input("Nazwa")
-            region = st.selectbox("Region", list(reg_opts.keys()))
-            wys = st.number_input("Wysokość", 1, 8850)
-        with col2:
-            otw = st.time_input("Otwarcie", datetime.time(8,0))
-            zam = st.time_input("Zamknięcie", datetime.time(20,0))
-        
-        if st.form_submit_button("Dodaj"):
-            success, msg = crud.add_schronisko_transaction(
-                reg_opts[region], nazwa, wys, 
-                otw.strftime("%H:%M"), zam.strftime("%H:%M")
-            )
-            if success:
-                st.success("Dodano!")
-                st.rerun()
-            else:
-                st.error(msg)
+    tab1, tab2 = st.tabs(["📋 Lista i Edycja", "➕ Dodaj nowe"])
 
-# W pliku app.py
+    # === ZAKŁADKA 1: EDYCJA I USUWANIE ===
+    with tab1:
+        # Pobieranie danych
+        df = crud.get_schroniska_view()
+
+        # Wyszukiwanie
+        search = st.text_input("Szukaj schroniska:", key="search_sch")
+        if search:
+            df = df[df['NAZWA'].str.contains(search, case=False)]
+
+        st.dataframe(df, width="stretch")
+
+        st.subheader("Edycja Schroniska")
+        # Dropdown wyboru
+        opts = {f"{row['NAZWA']}": row['ID_SCHRONISKA'] for i, row in df.iterrows()}
+        sel_sch = st.selectbox("Wybierz schronisko do edycji", ["-- Wybierz --"] + list(opts.keys()))
+
+        if sel_sch != "-- Wybierz --":
+            s_id = opts[sel_sch]
+            # Pobieramy wiersz danych z DataFrame
+            cur = df[df['ID_SCHRONISKA'] == s_id].iloc[0]
+
+            with st.form("edit_schronisko_form"):
+                col1, col2 = st.columns(2)
+                
+                # Konwersja czasu string -> object (do formularza)
+                try:
+                    t_otw_obj = datetime.datetime.strptime(cur['GODZINA_OTWARCIA'], "%H:%M").time()
+                    t_zam_obj = datetime.datetime.strptime(cur['GODZINA_ZAMKNIECIA'], "%H:%M").time()
+                except:
+                    t_otw_obj = datetime.time(8,0)
+                    t_zam_obj = datetime.time(20,0)
+
+                # Znalezienie indexu regionu
+                # Pobieramy ID regionu z mapy nazw (trochę na około, bo w widoku mamy nazwę regionu, a potrzebujemy ID do update)
+                curr_reg_name = cur['REGION']
+                try:
+                    curr_reg_id = reg_opts[curr_reg_name]
+                    reg_index = list(reg_opts.keys()).index(curr_reg_name)
+                except:
+                    reg_index = 0
+
+                with col1:
+                    e_nazwa = st.text_input("Nazwa", value=cur['NAZWA'])
+                    e_region = st.selectbox("Region", list(reg_opts.keys()), index=reg_index)
+                    e_wys = st.number_input("Wysokość [m.n.p.m.]", 1, 8850, value=int(cur['WYSOKOSC']))
+                with col2:
+                    e_otw = st.time_input("Otwarcie", value=t_otw_obj)
+                    e_zam = st.time_input("Zamknięcie", value=t_zam_obj)
+
+                c_save, c_del = st.columns([1, 4])
+                
+                if c_save.form_submit_button("💾 Zaktualizuj"):
+                    success, msg = crud.update_schronisko(
+                        s_id, reg_opts[e_region], e_nazwa, e_wys, 
+                        e_otw.strftime("%H:%M"), e_zam.strftime("%H:%M")
+                    )
+                    if success:
+                        st.success("Zaktualizowano!")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                
+                if c_del.form_submit_button("🗑️ Usuń schronisko", type="primary"):
+                    success, msg = crud.delete_schronisko(s_id)
+                    if success:
+                        st.warning("Usunięto schronisko.")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+    # === ZAKŁADKA 2: DODAWANIE ===
+    with tab2:
+        st.subheader("Nowe Schronisko")
+        with st.form("add_schronisko"):
+            col1, col2 = st.columns(2)
+            with col1:
+                nazwa = st.text_input("Nazwa")
+                region = st.selectbox("Region", list(reg_opts.keys()), key="add_reg_sel")
+                wys = st.number_input("Wysokość [m.n.p.m.]", 1, 8850)
+            with col2:
+                otw = st.time_input("Otwarcie", datetime.time(8,0))
+                zam = st.time_input("Zamknięcie", datetime.time(20,0))
+            
+            if st.form_submit_button("Dodaj"):
+                success, msg = crud.add_schronisko_transaction(
+                    reg_opts[region], nazwa, wys, 
+                    otw.strftime("%H:%M"), zam.strftime("%H:%M")
+                )
+                if success:
+                    st.success("Dodano!")
+                    st.rerun()
+                else:
+                    st.error(msg)
 
 def view_rezerwacje():
     st.header("Rezerwacje")
@@ -81,7 +153,7 @@ def view_rezerwacje():
         u_id = users[u_label]
 
     # 2. NOWA REZERWACJA (Formularz)
-    with st.expander("➕ Nowa rezerwacja", expanded=False):
+    with st.expander("➕ Nowa rezerwacja", expanded=True): # Zmieniłem na expanded=True dla wygody testowania
         schroniska = crud.get_schroniska_view()
         if schroniska.empty:
             st.warning("Brak schronisk.")
@@ -94,27 +166,40 @@ def view_rezerwacje():
                 if pokoje.empty:
                     st.warning("Brak pokoi.")
                 else:
-                    p_opts = {f"Pokój {row['NR_POKOJU']} ({row['CENA_ZA_NOC']} PLN)": row['ID_POKOJU'] for i, row in pokoje.iterrows()}
-                    sel_pok = st.selectbox("Pokój", list(p_opts.keys()))
+                    capacity_map = {row['ID_POKOJU']: int(row['LICZBA_MIEJSC_CALKOWITA']) for i, row in pokoje.iterrows()}
+                    
+                    p_opts = {
+                        f"Pokój {row['NR_POKOJU']} (Max: {row['LICZBA_MIEJSC_CALKOWITA']} os., {row['CENA_ZA_NOC']} PLN)": row['ID_POKOJU'] 
+                        for i, row in pokoje.iterrows()
+                    }
+                    
+                    sel_pok_label = st.selectbox("Pokój", list(p_opts.keys()))
+                    sel_pok_id = p_opts[sel_pok_label]
+                    
+                    # Pobieramy max miejsc dla wybranego pokoju
+                    max_osob = capacity_map[sel_pok_id]
                     
                     c1, c2 = st.columns(2)
                     d_start = c1.date_input("Od", datetime.date.today())
                     d_end = c2.date_input("Do", datetime.date.today() + datetime.timedelta(days=1))
-                    osoby = st.slider("Osoby", 1, 10, 2)
+                    
+                    # ZMIANA: Zamiast Slidera -> Selectbox z listą od 1 do max_osob
+                    osoby_options = list(range(1, max_osob + 1))
+                    osoby = st.selectbox("Liczba osób", osoby_options)
 
                     col_btn1, col_btn2 = st.columns(2)
                     if col_btn1.button("Oblicz koszt"):
                         if d_end <= d_start:
                             st.error("Data końcowa musi być późniejsza.")
                         else:
-                            val = crud.calculate_cost(p_opts[sel_pok], d_start, d_end, osoby)
+                            val = crud.calculate_cost(sel_pok_id, d_start, d_end, osoby)
                             st.info(f"Koszt: {val} PLN")
 
                     if col_btn2.button("Rezerwuj", type="primary"):
                         if d_end <= d_start:
                             st.error("Data końcowa musi być późniejsza.")
                         else:
-                            success, msg = crud.make_reservation(p_opts[sel_pok], u_id, osoby, d_start, d_end)
+                            success, msg = crud.make_reservation(sel_pok_id, u_id, osoby, d_start, d_end)
                             if success:
                                 st.success("Rezerwacja dokonana pomyślnie!")
                                 st.rerun()
@@ -124,13 +209,11 @@ def view_rezerwacje():
     # 3. ZARZĄDZANIE REZERWACJAMI UŻYTKOWNIKA (USUWANIE)
     st.subheader(f"Aktywne rezerwacje użytkownika: {u_label.split(' (')[0]}")
     
-    # Pobieramy rezerwacje tego konkretnego użytkownika
     user_res_df = crud.get_user_reservations(u_id)
     
     if user_res_df.empty:
         st.info("Ten użytkownik nie ma żadnych rezerwacji.")
     else:
-        # Tworzymy listę do selectboxa: "ID: 15 | Schronisko Muminki (Pokój 101) | 2023-10-10 do 2023-10-12"
         res_opts = {}
         for i, row in user_res_df.iterrows():
             label = f"ID: {row['ID_REZERWACJI']} | {row['SCHRONISKO']} (P. {row['NR_POKOJU']}) | {row['DATA_ROZPOCZECIA']} - {row['DATA_ZAKONCZENIA']}"
@@ -139,7 +222,6 @@ def view_rezerwacje():
         col_del1, col_del2 = st.columns([3, 1])
         sel_res_to_del = col_del1.selectbox("Wybierz rezerwację do anulowania", list(res_opts.keys()))
         
-        # Przycisk usuwania
         if col_del2.button("🗑️ Anuluj rezerwację"):
             res_id_del = res_opts[sel_res_to_del]
             success, msg = crud.delete_reservation(res_id_del)
@@ -149,21 +231,14 @@ def view_rezerwacje():
             else:
                 st.error(msg)
     
-    # --- TABELA HISTORII (Dla wszystkich) ---
+    # --- TABELA HISTORII ---
     st.divider()
     st.subheader("Globalna historia rezerwacji")
     
-    # ZMIANA: Używamy get_all_reservations() zamiast get_user_reservations(u_id)
     df_rez = crud.get_all_reservations()
     
-    # Opcjonalnie: Filtrowanie tabeli
     show_only_selected = st.checkbox("Pokaż tylko dla wybranego użytkownika")
     if show_only_selected:
-         # Filtrujemy DataFrame w Pythonie (Login to pierwsza część klucza w słowniku users, ale tutaj mamy go w kolumnie)
-         # Prościej: pobraliśmy wszystko, teraz filtrujemy po ID (ale ID usera nie ma w SELECT wprost, jest w JOIN)
-         # Wróćmy: najłatwiej filtrować po Loginie lub Nazwisku które są w df_rez
-         selected_login = u_label.split(' (')[0] # To jest uproszczenie, lepiej filtrować w SQL jeśli danych dużo
-         # Ale skoro mamy CRUD w SQL:
          st.dataframe(crud.get_user_reservations(u_id), width="stretch")
     else:
         st.dataframe(df_rez, width="stretch")
@@ -171,11 +246,31 @@ def view_rezerwacje():
 def view_szlaki_manager():
     st.header("🥾 Zarządzanie Szlakami")
 
-    # Dane pomocnicze (Słowniki)
-    KOLORY = ['Czerwony', 'Niebieski', 'Zielony', 'Żółty', 'Czarny']
-    TRUDNOSCI = ['Spacerowy', 'Bardzo łatwy', 'Łatwy', 'Średniozaawansowany', 'Zaawansowany', 'Ekspercki']
+    # --- SŁOWNIKI MAPUJĄCE (UI -> BAZA) ---
+    # Klucz: To co widzi użytkownik (ładne PL)
+    # Wartość: To co zapisujemy w bazie (bezpieczne ASCII)
+    MAP_KOLOR = {
+        'Czerwony': 'CZERWONY',
+        'Niebieski': 'NIEBIESKI',
+        'Zielony': 'ZIELONY',
+        'Żółty': 'ZOLTY',
+        'Czarny': 'CZARNY',
+        'Inny': 'INNY'
+    }
     
-    # Pobieramy regiony z bazy do dropdowna
+    MAP_TRUDNOSC = {
+        'Spacerowy': 'SPACEROWY',
+        'Bardzo łatwy': 'BARDZO LATWY',
+        'Łatwy': 'LATWY',
+        'Średniozaawansowany': 'SREDNIOZAAWANSOWANY',
+        'Zaawansowany': 'ZAAWANSOWANY',
+        'Ekspercki': 'EKSPERCKI'
+    }
+
+    # Słowniki odwrócone (BAZA -> UI) do wyświetlania w tabeli
+    REV_KOLOR = {v: k for k, v in MAP_KOLOR.items()}
+    REV_TRUDNOSC = {v: k for k, v in MAP_TRUDNOSC.items()}
+
     regions_df = crud.get_regiony()
     region_map = {row['NAZWA']: row['ID_REGIONU'] for i, row in regions_df.iterrows()}
 
@@ -184,53 +279,83 @@ def view_szlaki_manager():
     with tab1:
         # Wyszukiwanie
         df = crud.get_szlaki()
-        search = st.text_input("Szukaj szlaku (nazwa):", key="search_szlak")
-        if search:
-            df = df[df['NAZWA'].str.contains(search, case=False)]
         
-        # ZMIANA: width="stretch"
-        st.dataframe(df, width="stretch")
+        # TŁUMACZENIE TABELI: Podmieniamy kody z bazy na ładne nazwy PL
+        if not df.empty:
+            # Tworzymy kopie kolumn do wyświetlenia
+            df['KOLOR_WYSWIETLANY'] = df['KOLOR'].map(REV_KOLOR).fillna(df['KOLOR'])
+            df['TRUDNOSC_WYSWIETLANA'] = df['TRUDNOSC'].map(REV_TRUDNOSC).fillna(df['TRUDNOSC'])
+            
+            # Filtrowanie
+            search = st.text_input("Szukaj szlaku (nazwa):", key="search_szlak")
+            if search:
+                df = df[df['NAZWA'].str.contains(search, case=False)]
+            
+            # Wybieramy co pokazać użytkownikowi (ukrywamy surowe kody ASCII)
+            cols_to_show = ['ID_SZLAKU', 'REGION', 'NAZWA', 'KOLOR_WYSWIETLANY', 'TRUDNOSC_WYSWIETLANA', 'DLUGOSC', 'CZAS_PRZEJSCIA']
+            st.dataframe(df[cols_to_show], width="stretch")
+        else:
+            st.info("Brak szlaków w bazie.")
 
-        # Edycja
+        st.divider()
         st.subheader("Edycja Szlaku")
-        opts = {f"{row['NAZWA']} ({row['KOLOR']})": row['ID_SZLAKU'] for i, row in df.iterrows()}
-        sel_szlak = st.selectbox("Wybierz szlak do edycji", ["-- Wybierz --"] + list(opts.keys()))
+        
+        if not df.empty:
+            # W dropdownie też pokazujemy ładne nazwy
+            # df iterrows zwraca surowe dane z bazy, więc musimy je przetłumaczyć w locie używając REV_...
+            opts = {}
+            for i, row in df.iterrows():
+                k_pl = REV_KOLOR.get(row['KOLOR'], row['KOLOR'])
+                label = f"{row['NAZWA']} ({k_pl})"
+                opts[label] = row['ID_SZLAKU']
 
-        if sel_szlak != "-- Wybierz --":
-            s_id = opts[sel_szlak]
-            cur = df[df['ID_SZLAKU'] == s_id].iloc[0]
+            sel_szlak = st.selectbox("Wybierz szlak do edycji", ["-- Wybierz --"] + list(opts.keys()))
 
-            with st.form("edit_szlak"):
-                try:
-                    curr_kolor_idx = KOLORY.index(cur['KOLOR'])
-                    curr_trud_idx = TRUDNOSCI.index(cur['TRUDNOSC'])
-                except:
-                    curr_kolor_idx = 0
-                    curr_trud_idx = 0
+            if sel_szlak != "-- Wybierz --":
+                s_id = opts[sel_szlak]
+                cur = df[df['ID_SZLAKU'] == s_id].iloc[0]
 
-                c1, c2 = st.columns(2)
-                new_nazwa = c1.text_input("Nazwa", value=cur['NAZWA'])
-                new_kolor = c2.selectbox("Kolor", KOLORY, index=curr_kolor_idx)
-                new_trud = c1.selectbox("Trudność", TRUDNOSCI, index=curr_trud_idx)
-                
-                new_dlug = c2.number_input("Długość (km)", value=float(cur['DLUGOSC']))
-                new_czas = st.number_input("Czas (min)", value=int(cur['CZAS_PRZEJSCIA']))
+                with st.form("edit_szlak"):
+                    # Ustawianie domyślnych wartości w formularzu
+                    # Pobieramy z bazy np. 'ZOLTY', zamieniamy na 'Żółty' i szukamy indexu w liście
+                    try:
+                        current_kolor_pl = REV_KOLOR.get(cur['KOLOR'])
+                        curr_kolor_idx = list(MAP_KOLOR.keys()).index(current_kolor_pl)
+                        
+                        current_trud_pl = REV_TRUDNOSC.get(cur['TRUDNOSC'])
+                        curr_trud_idx = list(MAP_TRUDNOSC.keys()).index(current_trud_pl)
+                    except:
+                        curr_kolor_idx = 0
+                        curr_trud_idx = 0
 
-                if st.form_submit_button("Aktualizuj Szlak"):
-                    success, msg = crud.update_szlak(s_id, new_nazwa, new_kolor, new_trud, new_dlug, new_czas)
-                    if success:
-                        st.success("Zapisano!")
-                        st.rerun()
-                    else:
-                        st.error(msg)
-                
-                if st.form_submit_button("Usuń Szlak", type="primary"):
-                    success, msg = crud.delete_szlak(s_id)
-                    if success:
-                        st.warning("Usunięto!")
-                        st.rerun()
-                    else:
-                        st.error(msg)
+                    c1, c2 = st.columns(2)
+                    new_nazwa = c1.text_input("Nazwa", value=cur['NAZWA'])
+                    # Selectbox wyświetla polskie nazwy!
+                    sel_kolor_pl = c2.selectbox("Kolor", list(MAP_KOLOR.keys()), index=curr_kolor_idx)
+                    sel_trud_pl = c1.selectbox("Trudność", list(MAP_TRUDNOSC.keys()), index=curr_trud_idx)
+                    
+                    new_dlug = c2.number_input("Długość (km)", value=float(cur['DLUGOSC']))
+                    new_czas = st.number_input("Czas (min)", value=int(cur['CZAS_PRZEJSCIA']))
+
+                    if st.form_submit_button("Aktualizuj Szlak"):
+                        # Tłumaczymy z powrotem na ASCII przed wysłaniem do bazy
+                        db_kolor = MAP_KOLOR[sel_kolor_pl]     # Żółty -> ZOLTY
+                        db_trudnosc = MAP_TRUDNOSC[sel_trud_pl] # Średni... -> SREDNIO...
+                        
+                        success, msg = crud.update_szlak(s_id, new_nazwa, db_kolor, db_trudnosc, new_dlug, new_czas)
+                        if success:
+                            st.success("Zapisano!")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                    
+                    if st.form_submit_button("Usuń Szlak", type="primary"):
+                        success, msg = crud.delete_szlak(s_id)
+                        if success:
+                            st.warning("Usunięto!")
+                            st.rerun()
+                        else:
+                            st.error(msg)
 
     with tab2:
         st.subheader("Nowy Szlak")
@@ -238,13 +363,20 @@ def view_szlaki_manager():
             c1, c2 = st.columns(2)
             reg_label = c1.selectbox("Region", list(region_map.keys()))
             n_nazwa = c2.text_input("Nazwa szlaku")
-            n_kolor = c1.selectbox("Kolor", KOLORY)
-            n_trud = c2.selectbox("Trudność", TRUDNOSCI)
+            
+            # Selectboxy z polskimi nazwami
+            n_kolor_pl = c1.selectbox("Kolor", list(MAP_KOLOR.keys()))
+            n_trud_pl = c2.selectbox("Trudność", list(MAP_TRUDNOSC.keys()))
+            
             n_dlug = c1.number_input("Długość (km)", min_value=0.1)
             n_czas = c2.number_input("Czas (min)", min_value=1)
 
             if st.form_submit_button("Dodaj szlak"):
-                success, msg = crud.add_szlak(region_map[reg_label], n_nazwa, n_kolor, n_trud, n_dlug, n_czas)
+                # Konwersja PL -> ASCII
+                db_kolor = MAP_KOLOR[n_kolor_pl]
+                db_trudnosc = MAP_TRUDNOSC[n_trud_pl]
+
+                success, msg = crud.add_szlak(region_map[reg_label], n_nazwa, db_kolor, db_trudnosc, n_dlug, n_czas)
                 if success:
                     st.success("Szlak dodany!")
                     st.rerun()

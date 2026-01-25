@@ -18,6 +18,7 @@ def get_schroniska_view():
            s.godzina_otwarcia, s.godzina_zamkniecia
     FROM schroniska s
     JOIN regiony r ON s.id_regionu = r.id_regionu
+    ORDER BY s.nazwa
     """
     return db.execute_query_df(sql)
 
@@ -37,13 +38,42 @@ def add_schronisko_transaction(id_region, nazwa, wysokosc, otwarcie, zamkniecie)
     params = [id_region, nazwa, wysokosc, otwarcie, zamkniecie]
     return db.execute_dml(sql, params)
 
-# --- REZERWACJE (PROCEDURY I LOGIKA BIZNESOWA) ---
+def update_schronisko(id_schroniska, id_regionu, nazwa, wysokosc, otwarcie, zamkniecie):
+    sql = """
+    BEGIN
+        UPDATE punkty 
+        SET id_regionu = :1, nazwa = :2, wysokosc = :3
+        WHERE id_punktu = :4;
+
+        UPDATE schroniska
+        SET id_regionu = :1, nazwa = :2, wysokosc = :3, 
+            godzina_otwarcia = :5, godzina_zamkniecia = :6
+        WHERE id_schroniska = :4;
+    END;
+    """
+    return db.execute_dml(sql, [id_regionu, nazwa, wysokosc, id_schroniska, otwarcie, zamkniecie])
+
+def delete_schronisko(id_schroniska):
+    sql = """
+    BEGIN
+        DELETE FROM schroniska WHERE id_schroniska = :1;
+        DELETE FROM punkty WHERE id_punktu = :1;
+    END;
+    """
+    return db.execute_dml(sql, [id_schroniska])
+
+# --- REZERWACJE ---
 def get_users_dict():
     df = db.execute_query_df("SELECT id_uzytkownika, login, nazwisko FROM uzytkownicy")
     return {f"{row['LOGIN']} ({row['NAZWISKO']})": row['ID_UZYTKOWNIKA'] for i, row in df.iterrows()}
 
 def get_pokoje_in_schronisko(id_schroniska):
-    sql = "SELECT id_pokoju, nr_pokoju, cena_za_noc, liczba_miejsc_wolnych FROM pokoje WHERE id_schroniska = :1"
+    sql = """
+        SELECT id_pokoju, nr_pokoju, cena_za_noc, liczba_miejsc_wolnych, liczba_miejsc_calkowita 
+        FROM pokoje 
+        WHERE id_schroniska = :1
+        ORDER BY nr_pokoju
+    """
     return db.execute_query_df(sql, [id_schroniska])
 
 def calculate_cost(id_pokoju, start, end, osoby):
@@ -51,22 +81,13 @@ def calculate_cost(id_pokoju, start, end, osoby):
 
 def make_reservation(id_pokoju, id_user, osoby, start, end):
     """
-    Tworzy rezerwację z PEŁNĄ kontrolą pojemności pokoju w danym terminie.
-    Sprawdza, czy suma osób w tym pokoju w nachodzących datach nie przekracza pojemności.
+    Tworzy rezerwację w MODELU HOTELOWYM (Na wyłączność).
+    Jeśli pokój jest zajęty, zwraca informację, kiedy się zwolni.
     """
-    # 1. Pobierz pojemność całkowitą tego pokoju
-    cap_sql = "SELECT liczba_miejsc_calkowita FROM pokoje WHERE id_pokoju = :1"
-    cap_df = db.execute_query_df(cap_sql, [id_pokoju])
     
-    if cap_df.empty:
-        return False, "Błąd: Nie znaleziono wybranego pokoju."
-    
-    max_capacity = cap_df.iloc[0]['LICZBA_MIEJSC_CALKOWITA']
-
-    # 2. Oblicz ile miejsc jest już zajętych w tym terminie przez KOGOKOLWIEK
-    # Warunek nakładania się dat: (Start_Istniejąca < End_Nowa) AND (End_Istniejąca > Start_Nowa)
-    overlap_sql = """
-        SELECT COALESCE(SUM(liczba_osob), 0) as zajete
+    # 1. Sprawdzenie konfliktów dat i pobranie daty zwolnienia
+    check_sql = """
+        SELECT COUNT(*) as cnt, MAX(data_zakonczenia) as zajete_do
         FROM rezerwacje 
         WHERE id_pokoju = :1 
           AND status_rez != 'anulowana'
@@ -74,22 +95,35 @@ def make_reservation(id_pokoju, id_user, osoby, start, end):
           AND data_zakonczenia > :3
     """
     # Parametry: id_pokoju, data_konca_nowej, data_startu_nowej
-    occ_df = db.execute_query_df(overlap_sql, [id_pokoju, end, start])
-    current_occupancy = occ_df.iloc[0]['ZAJETE']
+    check_df = db.execute_query_df(check_sql, [id_pokoju, end, start])
+    
+    # Jeśli znaleziono chociaż jedną kolizję:
+    if not check_df.empty and check_df.iloc[0]['CNT'] > 0:
+        # Pobieramy datę, kiedy kończy się kolizyjna rezerwacja
+        free_date = check_df.iloc[0]['ZAJETE_DO']
+        try:
+            free_date_str = free_date.strftime('%Y-%m-%d')
+        except:
+            free_date_str = str(free_date).split(' ')[0]
 
-    # 3. Sprawdź czy zmieścimy nowe osoby
-    if current_occupancy + osoby > max_capacity:
-        remaining = max_capacity - current_occupancy
-        if remaining <= 0:
-            return False, f"Pokój jest w pełni zajęty w tym terminie."
-        else:
-            return False, f"Brak wystarczającej liczby miejsc. Wolne: {remaining}, Żądane: {osoby}."
+        return False, f"Ten pokój jest już zarezerwowany. Będzie wolny od: {free_date_str}"
 
-    # 4. Jeśli wszystko OK, wykonaj procedurę
+    # 2. Sprawdzenie pojemności (Czy pokój w ogóle mieści tyle osób?)
+    cap_sql = "SELECT liczba_miejsc_calkowita FROM pokoje WHERE id_pokoju = :1"
+    cap_df = db.execute_query_df(cap_sql, [id_pokoju])
+    
+    if cap_df.empty:
+        return False, "Błąd: Nie znaleziono pokoju."
+        
+    max_cap = cap_df.iloc[0]['LICZBA_MIEJSC_CALKOWITA']
+    
+    if osoby > max_cap:
+        return False, f"Ten pokój mieści maksymalnie {max_cap} osób. Chcesz zarezerwować dla {osoby}."
+
+    # 3. Jeśli czysto -> Rezerwujemy
     return db.execute_procedure("dokonaj_rezerwacji", [id_pokoju, id_user, osoby, start, end])
 
 def get_user_reservations(id_user):
-    """Pobiera historię rezerwacji dla konkretnego użytkownika"""
     sql = """
         SELECT r.id_rezerwacji, u.login, u.imie, u.nazwisko, 
                s.nazwa as schronisko, p.nr_pokoju, r.liczba_osob,
@@ -104,7 +138,6 @@ def get_user_reservations(id_user):
     return db.execute_query_df(sql, [id_user])
 
 def get_all_reservations():
-    """Pobiera historię WSZYSTKICH rezerwacji (do widoku globalnego)"""
     sql = """
         SELECT r.id_rezerwacji, u.login, u.imie, u.nazwisko, 
                s.nazwa as schronisko, p.nr_pokoju, r.liczba_osob,
@@ -117,36 +150,25 @@ def get_all_reservations():
     """
     return db.execute_query_df(sql)
 
-# W pliku crud.py (sekcja REZERWACJE)
-
 def delete_reservation(id_rezerwacji):
-    """
-    Usuwa rezerwację i przywraca wolne miejsca w pokoju.
-    Używamy bloku PL/SQL, aby zrobić to w jednej transakcji.
-    """
     sql = """
     DECLARE
         v_pokoj NUMBER;
         v_osob NUMBER;
     BEGIN
-        -- 1. Pobieramy dane rezerwacji przed usunięciem (używamy zmiennej :1)
         SELECT id_pokoju, liczba_osob INTO v_pokoj, v_osob
         FROM rezerwacje WHERE id_rezerwacji = :1;
 
-        -- 2. Usuwamy rezerwację (ponownie używamy tej samej zmiennej :1)
         DELETE FROM rezerwacje WHERE id_rezerwacji = :1;
 
-        -- 3. Oddajemy miejsca do puli wolnych w pokoju
         UPDATE pokoje 
         SET liczba_miejsc_wolnych = liczba_miejsc_wolnych + v_osob
         WHERE id_pokoju = v_pokoj;
     END;
     """
-    # Sterownik podstawi tę jedną wartość w oba miejsca oznaczone jako :1
     return db.execute_dml(sql, [id_rezerwacji])
 
 # --- SZLAKI ---
-
 def get_szlaki():
     sql = """
         SELECT sz.id_szlaku, r.nazwa as region, sz.nazwa, sz.kolor, 
@@ -177,9 +199,23 @@ def delete_szlak(id_szlaku):
 
 # --- POKOJE ---
 def get_pokoje_full():
+    """
+    Pobiera pokoje oraz dynamicznie oblicza, ile osób mieszka w nich DZISIAJ.
+    """
     sql = """
-        SELECT p.id_pokoju, s.nazwa as schronisko, p.nr_pokoju, 
-               p.liczba_miejsc_calkowita, p.liczba_miejsc_wolnych, p.cena_za_noc
+        SELECT p.id_pokoju, 
+               s.nazwa as schronisko, 
+               p.nr_pokoju, 
+               p.liczba_miejsc_calkowita, 
+               p.cena_za_noc,
+               (
+                   SELECT COALESCE(SUM(r.liczba_osob), 0)
+                   FROM rezerwacje r
+                   WHERE r.id_pokoju = p.id_pokoju
+                     AND r.status_rez != 'anulowana'
+                     AND TRUNC(SYSDATE) >= r.data_rozpoczecia 
+                     AND TRUNC(SYSDATE) < r.data_zakonczenia
+               ) as "ZAKWATEROWANI_DZIS"
         FROM pokoje p
         JOIN schroniska s ON p.id_schroniska = s.id_schroniska
         ORDER BY s.nazwa, p.nr_pokoju
