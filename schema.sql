@@ -91,11 +91,8 @@ CREATE TABLE pokoje (
     id_schroniska NUMBER REFERENCES schroniska(id_schroniska) NOT NULL,
     nr_pokoju NUMBER(3) NOT NULL,
     liczba_miejsc_calkowita NUMBER(3) NOT NULL,
-    liczba_miejsc_wolnych NUMBER(3) NOT NULL,
     cena_za_noc NUMBER(6, 2) NOT NULL,
     CONSTRAINT pokoje_miejsca_calk CHECK (liczba_miejsc_calkowita > 0),
-    CONSTRAINT pokoje_miejsca_woln CHECK (liczba_miejsc_wolnych >= 0),
-    CONSTRAINT pokoje_miejsca_logika CHECK (liczba_miejsc_wolnych <= liczba_miejsc_calkowita),
     CONSTRAINT nic_za_darmo CHECK (cena_za_noc > 0),
     UNIQUE(id_schroniska, nr_pokoju)
 );
@@ -133,8 +130,7 @@ CREATE TABLE rezerwacje (
     tresc_opinii VARCHAR2(300),
     CONSTRAINT rez_data_zak_chk CHECK (data_zakonczenia > data_rozpoczecia),
     CONSTRAINT rez_status_chk CHECK (status_rez IN ('zlozona', 'potwierdzona', 'oplacona', 'anulowana', 'zakonczona')),
-    CONSTRAINT rez_lb_gwiazdek CHECK (liczba_gwiazdek_opinia BETWEEN 0 AND 5),
-    CONSTRAINT rezerwacje_pokoj_daty_uk UNIQUE (id_pokoju, data_rozpoczecia, data_zakonczenia)
+    CONSTRAINT rez_lb_gwiazdek CHECK (liczba_gwiazdek_opinia BETWEEN 0 AND 5)
 );
 
 CREATE OR REPLACE FUNCTION oblicz_koszt_pobytu(

@@ -97,17 +97,56 @@ def make_reservation(id_pokoju, id_user, osoby, start, end):
     # 1. Sprawdzenie pojemności (Czy pokój w ogóle mieści tyle osób?)
     cap_sql = "SELECT liczba_miejsc_calkowita FROM pokoje WHERE id_pokoju = :1"
     cap_df = db.execute_query_df(cap_sql, [id_pokoju])
-    
     if cap_df.empty:
         return False, "Błąd: Nie znaleziono pokoju."
-        
     max_cap = cap_df.iloc[0]['LICZBA_MIEJSC_CALKOWITA']
-    
     if osoby > max_cap:
         return False, f"Ten pokój mieści maksymalnie {max_cap} osób. Chcesz zarezerwować dla {osoby}."
 
-    # 3. Jeśli czysto -> Rezerwujemy
-    return db.execute_procedure("dokonaj_rezerwacji", [id_pokoju, id_user, osoby, start, end])
+    # 2. Sprawdzenie sumy osób na każdy dzień
+    import pandas as pd
+    res_sql = """
+        SELECT data_rozpoczecia, data_zakonczenia, liczba_osob
+        FROM rezerwacje
+        WHERE id_pokoju = :1 AND status_rez != 'anulowana'
+    """
+    res_df = db.execute_query_df(res_sql, [id_pokoju])
+    busy_count = {}
+    for i, row in res_df.iterrows():
+        rng = pd.date_range(row['DATA_ROZPOCZECIA'], row['DATA_ZAKONCZENIA'] - pd.Timedelta(days=1))
+        for d in rng.date:
+            busy_count[d] = busy_count.get(d, 0) + int(row.get('LICZBA_OSOB', 1))
+    wybrane = list(pd.date_range(start, end - pd.Timedelta(days=1)).date)
+    for d in wybrane:
+        occ = busy_count.get(d, 0)
+        if occ + osoby > max_cap:
+            return False, "Wybrany termin przekracza pojemność pokoju w niektóre dni!"
+
+    # 3. Jeśli czysto -> Rezerwujemy (współdzielenie, bez zmiany liczba_miejsc_wolnych)
+    # Oblicz koszt
+    koszt = db.execute_function("oblicz_koszt_pobytu", oracledb.NUMBER, [id_pokoju, start, end, osoby])
+    if koszt is None:
+        return False, "Nie można obliczyć kosztu pobytu."
+    sql = """
+    DECLARE
+        v_id_pokoj NUMBER := :1;
+        v_id_user NUMBER := :2;
+        v_osob NUMBER := :3;
+        v_start DATE := :4;
+        v_end DATE := :5;
+        v_kwota NUMBER := :6;
+    BEGIN
+        INSERT INTO rezerwacje (id_pokoju, id_uzytkownika, liczba_osob, data_rozpoczecia, data_zakonczenia, kwota, status_rez)
+        VALUES (v_id_pokoj, v_id_user, v_osob, v_start, v_end, v_kwota, 'zlozona');
+
+        BEGIN
+            EXECUTE IMMEDIATE 'UPDATE pokoje SET liczba_miejsc_wolnych = liczba_miejsc_wolnych - :1 WHERE id_pokoju = :2' USING v_osob, v_id_pokoj;
+        EXCEPTION WHEN OTHERS THEN
+            NULL; -- kolumna moze nie istniec w schemacie, ignoruj
+        END;
+    END;
+    """
+    return db.execute_dml(sql, [id_pokoju, id_user, osoby, start, end, koszt])
 
 def get_user_reservations(id_user):
     sql = """
@@ -147,9 +186,11 @@ def delete_reservation(id_rezerwacji):
 
         DELETE FROM rezerwacje WHERE id_rezerwacji = :1;
 
-        UPDATE pokoje 
-        SET liczba_miejsc_wolnych = liczba_miejsc_wolnych + v_osob
-        WHERE id_pokoju = v_pokoj;
+        BEGIN
+            EXECUTE IMMEDIATE 'UPDATE pokoje SET liczba_miejsc_wolnych = liczba_miejsc_wolnych + :1 WHERE id_pokoju = :2' USING v_osob, v_pokoj;
+        EXCEPTION WHEN OTHERS THEN
+            NULL; -- kolumna moze nie istniec, ignoruj
+        END;
     END;
     """
     return db.execute_dml(sql, [id_rezerwacji])
@@ -174,6 +215,7 @@ def add_szlak(id_regionu, nazwa, kolor, trudnosc, dlugosc, czas):
 
 def update_szlak(id_szlaku, nazwa, kolor, trudnosc, dlugosc, czas):
     sql = """
+        # --- ODLEGLOSCI_MIEDZY_PUNKTAMI ---
         UPDATE szlaki 
         SET nazwa = :1, kolor = :2, trudnosc = :3, dlugosc = :4, czas_przejscia = :5
         WHERE id_szlaku = :6
@@ -188,6 +230,7 @@ def get_pokoje_full():
     """
     Pobiera pokoje oraz dynamicznie oblicza, ile osób mieszka w nich DZISIAJ.
     """
+        # --- KOLEJNOSCI ---
     sql = """
         SELECT p.id_pokoju, 
                s.nazwa as schronisko, 
@@ -210,23 +253,47 @@ def get_pokoje_full():
 
 def update_pokoj(id_pokoju, nowa_cena, nowe_miejsca):
     sql = """
+    DECLARE
+        v_id NUMBER := :3;
+        v_cena NUMBER := :1;
+        v_miejsca NUMBER := :2;
+    BEGIN
         UPDATE pokoje 
-        SET cena_za_noc = :1, 
-            liczba_miejsc_calkowita = :2,
-            liczba_miejsc_wolnych = :3 
-        WHERE id_pokoju = :4
+        SET cena_za_noc = v_cena, 
+            liczba_miejsc_calkowita = v_miejsca
+        WHERE id_pokoju = v_id;
+
+        BEGIN
+            EXECUTE IMMEDIATE 'UPDATE pokoje SET liczba_miejsc_wolnych = :1 WHERE id_pokoju = :2' USING v_miejsca, v_id;
+        EXCEPTION WHEN OTHERS THEN
+            NULL; -- ignore if column missing
+        END;
+    END;
     """
-    return db.execute_dml(sql, [nowa_cena, nowe_miejsca, nowe_miejsca, id_pokoju])
+    return db.execute_dml(sql, [nowa_cena, nowe_miejsca, id_pokoju])
 
 def delete_pokoj(id_pokoju):
     return db.execute_dml("DELETE FROM pokoje WHERE id_pokoju = :1", [id_pokoju])
 
 def add_pokoj(id_schroniska, nr_pokoju, miejsca, cena):
     sql = """
-        INSERT INTO pokoje (id_schroniska, nr_pokoju, liczba_miejsc_calkowita, liczba_miejsc_wolnych, cena_za_noc)
-        VALUES (:1, :2, :3, :4, :5)
+    DECLARE
+        v_id_s NUMBER := :1;
+        v_nr VARCHAR2(100) := :2;
+        v_m NUMBER := :3;
+        v_c NUMBER := :4;
+    BEGIN
+        INSERT INTO pokoje (id_schroniska, nr_pokoju, liczba_miejsc_calkowita, cena_za_noc)
+        VALUES (v_id_s, v_nr, v_m, v_c);
+
+        BEGIN
+            EXECUTE IMMEDIATE 'UPDATE pokoje SET liczba_miejsc_wolnych = :1 WHERE id_schroniska = :2 AND nr_pokoju = :3' USING v_m, v_id_s, v_nr;
+        EXCEPTION WHEN OTHERS THEN
+            NULL; -- jeżeli kolumna nie istnieje w schemacie, ignoruj
+        END;
+    END;
     """
-    return db.execute_dml(sql, [id_schroniska, nr_pokoju, miejsca, miejsca, cena])
+    return db.execute_dml(sql, [id_schroniska, nr_pokoju, miejsca, cena])
 
 # --- UZYTKOWNICY ---
 def get_users_full():
@@ -306,3 +373,48 @@ def add_pokoj_wyposazenie(id_pokoju, id_wyposazenia):
 
 def delete_pokoj_wyposazenie(id_pokoju, id_wyposazenia):
     return db.execute_dml("DELETE FROM pokoje_wyposazenie WHERE id_pokoju = :1 AND id_wyposazenia = :2", [id_pokoju, id_wyposazenia])
+
+# --- PUNKTY ---
+def get_punkty():
+    return db.execute_query_df("SELECT id_punktu, id_regionu, nazwa, typ, wysokosc, wspolrzedne_dlugosc, wspolrzedne_szerokosc FROM punkty ORDER BY id_punktu")
+
+def add_punkt(id_regionu, nazwa, typ, wysokosc, dlugosc, szerokosc):
+    sql = "INSERT INTO punkty (id_regionu, nazwa, typ, wysokosc, wspolrzedne_dlugosc, wspolrzedne_szerokosc) VALUES (:1, :2, :3, :4, :5, :6)"
+    return db.execute_dml(sql, [id_regionu, nazwa, typ, wysokosc, dlugosc, szerokosc])
+
+def update_punkt(id_punktu, id_regionu, nazwa, typ, wysokosc, dlugosc, szerokosc):
+    sql = "UPDATE punkty SET id_regionu = :1, nazwa = :2, typ = :3, wysokosc = :4, wspolrzedne_dlugosc = :5, wspolrzedne_szerokosc = :6 WHERE id_punktu = :7"
+    return db.execute_dml(sql, [id_regionu, nazwa, typ, wysokosc, dlugosc, szerokosc, id_punktu])
+
+def delete_punkt(id_punktu):
+    return db.execute_dml("DELETE FROM punkty WHERE id_punktu = :1", [id_punktu])
+
+# --- ODLEGLOSCI_MIEDZY_PUNKTAMI ---
+def get_odleglosci():
+    return db.execute_query_df("SELECT id_pkt_od, id_pkt_do, odleglosc, przewyzszenie, czas_przejscia FROM odleglosci_miedzy_punktami ORDER BY id_pkt_od, id_pkt_do")
+
+def add_odleglosc(id_pkt_od, id_pkt_do, odleglosc, przewyzszenie, czas_przejscia):
+    sql = "INSERT INTO odleglosci_miedzy_punktami (id_pkt_od, id_pkt_do, odleglosc, przewyzszenie, czas_przejscia) VALUES (:1, :2, :3, :4, :5)"
+    return db.execute_dml(sql, [id_pkt_od, id_pkt_do, odleglosc, przewyzszenie, czas_przejscia])
+
+def update_odleglosc(id_pkt_od, id_pkt_do, odleglosc, przewyzszenie, czas_przejscia):
+    sql = "UPDATE odleglosci_miedzy_punktami SET odleglosc = :1, przewyzszenie = :2, czas_przejscia = :3 WHERE id_pkt_od = :4 AND id_pkt_do = :5"
+    return db.execute_dml(sql, [odleglosc, przewyzszenie, czas_przejscia, id_pkt_od, id_pkt_do])
+
+def delete_odleglosc(id_pkt_od, id_pkt_do):
+    return db.execute_dml("DELETE FROM odleglosci_miedzy_punktami WHERE id_pkt_od = :1 AND id_pkt_do = :2", [id_pkt_od, id_pkt_do])
+
+# --- KOLEJNOSCI ---
+def get_kolejnosci():
+    return db.execute_query_df("SELECT id_szlaku_kol, id_punktu, kolejnosc_na_szlaku FROM kolejnosci ORDER BY id_szlaku_kol, kolejnosc_na_szlaku")
+
+def add_kolejnosc(id_szlaku_kol, id_punktu, kolejnosc_na_szlaku):
+    sql = "INSERT INTO kolejnosci (id_szlaku_kol, id_punktu, kolejnosc_na_szlaku) VALUES (:1, :2, :3)"
+    return db.execute_dml(sql, [id_szlaku_kol, id_punktu, kolejnosc_na_szlaku])
+
+def update_kolejnosc(id_szlaku_kol, id_punktu, kolejnosc_na_szlaku):
+    sql = "UPDATE kolejnosci SET kolejnosc_na_szlaku = :1 WHERE id_szlaku_kol = :2 AND id_punktu = :3"
+    return db.execute_dml(sql, [kolejnosc_na_szlaku, id_szlaku_kol, id_punktu])
+
+def delete_kolejnosc(id_szlaku_kol, id_punktu, kolejnosc_na_szlaku):
+    return db.execute_dml("DELETE FROM kolejnosci WHERE id_szlaku_kol = :1 AND id_punktu = :2 AND kolejnosc_na_szlaku = :3", [id_szlaku_kol, id_punktu, kolejnosc_na_szlaku])

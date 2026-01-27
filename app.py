@@ -1,7 +1,99 @@
+# --- KOLEJNOŚCI ---
+def view_kolejnosci_manager():
+    st.header("🔢 Kolejności punktów na szlakach")
+
+    # session state for unified success behavior
+    if 'kol_add_success' not in st.session_state:
+        st.session_state['kol_add_success'] = False
+    if st.session_state.get('kol_add_success'):
+        st.success("Dodano kolejność.")
+        st.session_state['kol_add_success'] = False
+
+    df = crud.get_kolejnosci()
+    # maps for friendly names
+    szlaki_df = crud.get_szlaki()
+    szlaki_rev = {row['ID_SZLAKU']: row['NAZWA'] for i, row in szlaki_df.iterrows()}
+    # map for selectbox (label -> id)
+    szlaki_map = {f"{row['NAZWA']} (ID: {row['ID_SZLAKU']})": row['ID_SZLAKU'] for i, row in szlaki_df.iterrows()}
+    punkty_df = crud.get_punkty()
+    punkty_rev = {row['ID_PUNKTU']: row['NAZWA'] for i, row in punkty_df.iterrows()}
+    punkty_map = {f"{row['NAZWA']} (ID: {row['ID_PUNKTU']})": row['ID_PUNKTU'] for i, row in punkty_df.iterrows()}
+
+    # Friendly display table
+    if not df.empty:
+        df_display = df.copy()
+        df_display['SZLAK'] = df_display['ID_SZLAKU_KOL'].map(szlaki_rev).fillna(df_display['ID_SZLAKU_KOL'])
+        df_display['PUNKT'] = df_display['ID_PUNKTU'].map(punkty_rev).fillna(df_display['ID_PUNKTU'])
+        cols = ['ID_SZLAKU_KOL', 'SZLAK', 'PUNKT', 'KOLEJNOSC_NA_SZLAKU']
+        st.dataframe(df_display[cols], width="stretch")
+    else:
+        st.dataframe(df, width="stretch")
+    with st.expander("Dodaj kolejność"):
+        with st.form("add_kol_form"):
+            sel_szlak = st.selectbox("Szlak", list(szlaki_map.keys()), key="kol_szlak")
+            sel_punkt = st.selectbox("Punkt", list(punkty_map.keys()), key="kol_punkt")
+            kolejnosc = st.number_input("Kolejność na szlaku", min_value=1)
+            if st.form_submit_button("Dodaj"):
+                id_szlaku = szlaki_map[sel_szlak]
+                id_punktu = punkty_map[sel_punkt]
+                success, msg = crud.add_kolejnosc(id_szlaku, id_punktu, kolejnosc)
+                if success:
+                    st.session_state['kol_add_success'] = True
+                    safe_rerun()
+                else:
+                    st.error(msg)
+    with st.expander("Usuń kolejność"):
+        # build friendly options
+        opts = {}
+        for i, row in df.iterrows():
+            sname = szlaki_rev.get(row['ID_SZLAKU_KOL'], row['ID_SZLAKU_KOL'])
+            pname = punkty_rev.get(row['ID_PUNKTU'], row['ID_PUNKTU'])
+            label = f"{sname} - {pname} (kolejność {row['KOLEJNOSC_NA_SZLAKU']})"
+            opts[label] = (row['ID_SZLAKU_KOL'], row['ID_PUNKTU'], row['KOLEJNOSC_NA_SZLAKU'])
+        sel = st.selectbox("Wybierz kolejność", ["-- Wybierz --"] + list(opts.keys()))
+        if sel != "-- Wybierz --":
+            if st.button("Usuń kolejność"):
+                id_szlaku, id_punktu, kolejnosc = opts[sel]
+                success, msg = crud.delete_kolejnosc(id_szlaku, id_punktu, kolejnosc)
+                if success:
+                    st.success("Usunięto kolejność.")
+                    safe_rerun()
+                else:
+                    st.error(msg)
+def view_rezerwacje_manager():
+    st.header("🗂️ Zarządzanie rezerwacjami")
+    df = crud.get_all_reservations()
+    if df.empty:
+        st.info("Brak rezerwacji w systemie.")
+        return
+    st.dataframe(df, width="stretch")
+    st.subheader("Usuń rezerwację")
+    opts = {f"{row['LOGIN']} {row['NAZWISKO']} | {row['SCHRONISKO']} pok. {row['NR_POKOJU']} | {row['DATA_ROZPOCZECIA']} - {row['DATA_ZAKONCZENIA']}": row['ID_REZERWACJI'] for i, row in df.iterrows()}
+    sel = st.selectbox("Wybierz rezerwację do usunięcia", ["-- Wybierz --"] + list(opts.keys()))
+    if sel != "-- Wybierz --":
+        if st.button("Usuń rezerwację", type="primary"):
+            success, msg = crud.delete_reservation(opts[sel])
+            if success:
+                st.success("Rezerwacja usunięta.")
+                st.rerun()
+            else:
+                st.error(msg)
 def view_wyposazenie_manager():
     st.header("🛠️ Zarządzanie Wyposażeniem")
 
+    # session state dla zakładek i komunikatów
+    if 'wyposazenie_tab' not in st.session_state:
+        st.session_state['wyposazenie_tab'] = 0
+    if 'wyposazenie_add_success' not in st.session_state:
+        st.session_state['wyposazenie_add_success'] = False
+
     tab1, tab2 = st.tabs(["📋 Lista i Edycja", "➕ Dodaj nowe wyposażenie"])
+
+    # pokaż komunikat sukcesu po dodaniu
+    if st.session_state.get('wyposazenie_add_success'):
+        with tab1:
+            st.success("Dodano wyposażenie.")
+        st.session_state['wyposazenie_add_success'] = False
 
     # --- Tabela i edycja ---
     with tab1:
@@ -40,7 +132,8 @@ def view_wyposazenie_manager():
             if st.form_submit_button("Dodaj"):
                 success, msg = crud.add_wyposazenie(nazwa)
                 if success:
-                    st.success(msg)
+                    st.session_state['wyposazenie_tab'] = 0
+                    st.session_state['wyposazenie_add_success'] = True
                     st.rerun()
                 else:
                     st.error(msg)
@@ -133,6 +226,19 @@ def view_wyposazenie_manager():
 import streamlit as st
 import crud
 import datetime
+
+# Helper to safely request a rerun across Streamlit versions
+def safe_rerun():
+    try:
+        # preferred older API
+        return st.experimental_rerun()
+    except Exception:
+        try:
+            # fallback
+            return st.rerun()
+        except Exception:
+            # last resort: stop the script (UI will update on next interaction)
+            return st.stop()
 
 def view_regiony():
     st.header("Zarządzanie Regionami")
@@ -433,7 +539,18 @@ def view_szlaki_manager():
     regions_df = crud.get_regiony()
     region_map = {row['NAZWA']: row['ID_REGIONU'] for i, row in regions_df.iterrows()}
 
+    # session state dla zakładek i komunikatów
+    if 'szlaki_tab' not in st.session_state:
+        st.session_state['szlaki_tab'] = 0
+    if 'szlak_add_success' not in st.session_state:
+        st.session_state['szlak_add_success'] = False
+
     tab1, tab2 = st.tabs(["📋 Przegląd i Edycja", "➕ Dodaj nowy szlak"])
+
+    if st.session_state.get('szlak_add_success'):
+        with tab1:
+            st.success("Szlak dodany.")
+        st.session_state['szlak_add_success'] = False
 
     with tab1:
         # Wyszukiwanie
@@ -460,8 +577,6 @@ def view_szlaki_manager():
         st.subheader("Edycja Szlaku")
         
         if not df.empty:
-            # W dropdownie też pokazujemy ładne nazwy
-            # df iterrows zwraca surowe dane z bazy, więc musimy je przetłumaczyć w locie używając REV_...
             opts = {}
             for i, row in df.iterrows():
                 k_pl = REV_KOLOR.get(row['KOLOR'], row['KOLOR'])
@@ -475,12 +590,9 @@ def view_szlaki_manager():
                 cur = df[df['ID_SZLAKU'] == s_id].iloc[0]
 
                 with st.form("edit_szlak"):
-                    # Ustawianie domyślnych wartości w formularzu
-                    # Pobieramy z bazy np. 'ZOLTY', zamieniamy na 'Żółty' i szukamy indexu w liście
                     try:
                         current_kolor_pl = REV_KOLOR.get(cur['KOLOR'])
                         curr_kolor_idx = list(MAP_KOLOR.keys()).index(current_kolor_pl)
-                        
                         current_trud_pl = REV_TRUDNOSC.get(cur['TRUDNOSC'])
                         curr_trud_idx = list(MAP_TRUDNOSC.keys()).index(current_trud_pl)
                     except:
@@ -489,25 +601,21 @@ def view_szlaki_manager():
 
                     c1, c2 = st.columns(2)
                     new_nazwa = c1.text_input("Nazwa", value=cur['NAZWA'])
-                    # Selectbox wyświetla polskie nazwy!
                     sel_kolor_pl = c2.selectbox("Kolor", list(MAP_KOLOR.keys()), index=curr_kolor_idx)
                     sel_trud_pl = c1.selectbox("Trudność", list(MAP_TRUDNOSC.keys()), index=curr_trud_idx)
-                    
                     new_dlug = c2.number_input("Długość (km)", value=float(cur['DLUGOSC']))
                     new_czas = st.number_input("Czas (min)", value=int(cur['CZAS_PRZEJSCIA']))
 
                     if st.form_submit_button("Aktualizuj Szlak"):
-                        # Tłumaczymy z powrotem na ASCII przed wysłaniem do bazy
-                        db_kolor = MAP_KOLOR[sel_kolor_pl]     # Żółty -> ZOLTY
-                        db_trudnosc = MAP_TRUDNOSC[sel_trud_pl] # Średni... -> SREDNIO...
-                        
+                        db_kolor = MAP_KOLOR[sel_kolor_pl]
+                        db_trudnosc = MAP_TRUDNOSC[sel_trud_pl]
                         success, msg = crud.update_szlak(s_id, new_nazwa, db_kolor, db_trudnosc, new_dlug, new_czas)
                         if success:
                             st.success("Zapisano!")
                             st.rerun()
                         else:
                             st.error(msg)
-                    
+
                     if st.form_submit_button("Usuń Szlak", type="primary"):
                         success, msg = crud.delete_szlak(s_id)
                         if success:
@@ -534,117 +642,79 @@ def view_szlaki_manager():
                 # Konwersja PL -> ASCII
                 db_kolor = MAP_KOLOR[n_kolor_pl]
                 db_trudnosc = MAP_TRUDNOSC[n_trud_pl]
-
                 success, msg = crud.add_szlak(region_map[reg_label], n_nazwa, db_kolor, db_trudnosc, n_dlug, n_czas)
                 if success:
-                    st.success("Szlak dodany!")
-                    st.rerun()
+                    st.session_state['szlaki_tab'] = 0
+                    st.session_state['szlak_add_success'] = True
+                    safe_rerun()
                 else:
                     st.error(msg)
 
 def view_pokoje_manager():
     st.header("🏢 Zarządzanie Pokojami")
-
-    # Ustawienia session_state dla tabów i komunikatów
-    if 'pokoje_tab' not in st.session_state:
-        st.session_state['pokoje_tab'] = 0
     if 'pokoj_add_success' not in st.session_state:
         st.session_state['pokoj_add_success'] = False
-
-    tab_labels = ["📋 Przegląd i Edycja", "➕ Dodaj nowy pokój"]
-    tab_idx = st.session_state['pokoje_tab']
-    tabs = st.tabs(tab_labels)
-    tab1, tab2 = tabs[0], tabs[1]
-
-    # Komunikat o sukcesie po dodaniu
     if st.session_state['pokoj_add_success']:
-        with tab1:
-            st.success("Pokój dodany!")
+        st.success("Pokój dodany!")
         st.session_state['pokoj_add_success'] = False
-
-    # === ZAKŁADKA 1: Przeglądanie, Wyszukiwanie, Edycja, Usuwanie ===
+    tab_labels = ["📋 Przegląd i Edycja", "➕ Dodaj nowy pokój"]
+    tab1, tab2 = st.tabs(tab_labels)
     with tab1:
-        # 1. POBIERANIE DANYCH
         df = crud.get_pokoje_full()
-
-        # 2. WYSZUKIWANIE
+        # filtrowanie po schronisku (dropdown) oraz pole wyszukiwania
+        schroniska_list = sorted(df['SCHRONISKO'].unique().tolist()) if not df.empty else []
+        schroniska_sel = st.selectbox("Wybierz schronisko", ["Wszystkie"] + schroniska_list, key="filter_schronisko")
         col_search, col_info = st.columns([3, 1])
         with col_search:
             search_query = st.text_input("🔍 Szukaj (wpisz nazwę schroniska lub numer pokoju):", key="search_pokoj")
-        
+        # filtruj po wybranym schronisku
+        if schroniska_sel != "Wszystkie":
+            df = df[df['SCHRONISKO'] == schroniska_sel]
         if search_query:
             mask = (df['SCHRONISKO'].str.contains(search_query, case=False)) | \
                    (df['NR_POKOJU'].astype(str).str.contains(search_query))
             df_display = df[mask]
         else:
             df_display = df
-
         with col_info:
             st.info(f"Znaleziono: {len(df_display)}")
-
-        # Wyświetlanie tabeli
         st.dataframe(df_display, width="stretch")
         st.markdown("---")
-
-        # 3. MODYFIKACJA I USUWANIE
         st.subheader("🛠️ Edycja / Usuwanie")
-        
         record_options = {
-            f"{row['SCHRONISKO']} - Pokój nr {row['NR_POKOJU']} (ID: {row['ID_POKOJU']})": row['ID_POKOJU'] 
+            f"{row['SCHRONISKO']} - Pokój nr {row['NR_POKOJU']} (ID: {row['ID_POKOJU']})": row['ID_POKOJU']
             for index, row in df_display.iterrows()
         }
-
         selected_label = st.selectbox("Wybierz pokój do edycji:", ["-- Wybierz z listy --"] + list(record_options.keys()))
-
         if selected_label != "-- Wybierz z listy --":
             selected_id = record_options[selected_label]
             current_data = df[df['ID_POKOJU'] == selected_id].iloc[0]
-
             with st.form("edit_pokoj_form"):
                 c1, c2 = st.columns(2)
                 with c1:
                     st.text_input("Schronisko", value=current_data['SCHRONISKO'], disabled=True)
-                    new_places = st.number_input("Liczba miejsc", 
-                                                 min_value=1, max_value=50, 
-                                                 value=int(current_data['LICZBA_MIEJSC_CALKOWITA']))
-                with tab2:
-                    st.subheader("Dodaj nowe wyposażenie")
-                    with st.form("add_wyposazenie_form"):
-                        nazwa = st.text_input("Nazwa wyposażenia")
-                        if st.form_submit_button("Dodaj"):
-                            if not nazwa.strip():
-                                st.error("Nazwa wyposażenia nie może być pusta.")
-                            elif len(nazwa.strip()) > 100:
-                                st.error("Nazwa wyposażenia nie może przekraczać 100 znaków.")
-                            else:
-                                success, msg = crud.add_wyposazenie(nazwa.strip())
-                                if success:
-                                    st.success(msg)
-                                    st.rerun()
-                                else:
-                                    st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
-                        if success:
-                            st.success("Zaktualizowano!")
-                            st.rerun()
-                        else:
-                            st.error(msg)
-                
-                with col_del:
-                    if st.form_submit_button("🗑️ Usuń pokój", type="primary"):
-                        success, msg = crud.delete_pokoj(selected_id)
-                        if success:
-                            st.warning("Pokój usunięty.")
-                            st.rerun()
-                        else:
-                            st.error(msg)
-
-    # === ZAKŁADKA 2: Dodawanie nowego pokoju ===
+                    new_places = st.number_input("Liczba miejsc", min_value=1, max_value=50, value=int(current_data['LICZBA_MIEJSC_CALKOWITA']))
+                with c2:
+                    new_price = st.number_input("Cena za noc (PLN)", min_value=0.0, value=float(current_data['CENA_ZA_NOC']), step=5.0)
+                col_save, col_del = st.columns([1, 4])
+                if col_save.form_submit_button("💾 Zapisz zmiany"):
+                    success, msg = crud.update_pokoj(selected_id, new_price, new_places)
+                    if success:
+                        st.success("Zaktualizowano dane pokoju!")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                if col_del.form_submit_button("🗑️ Usuń pokój", type="primary"):
+                    success, msg = crud.delete_pokoj(selected_id)
+                    if success:
+                        st.warning("Pokój usunięty.")
+                        st.rerun()
+                    else:
+                        st.error(msg)
     with tab2:
         st.subheader("Definicja nowego pokoju")
-        # Potrzebujemy listy schronisk do dropdowna
         schroniska_df = crud.get_schroniska_view()
         schroniska_map = {row['NAZWA']: row['ID_SCHRONISKA'] for i, row in schroniska_df.iterrows()}
-
         with st.form("add_pokoj_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
@@ -671,7 +741,18 @@ def view_uzytkownicy_manager():
     ROLA_MAP = {'Użytkownik': 'u', 'Pracownik': 'p'}
     ROLA_REV = {'u': 'Użytkownik', 'p': 'Pracownik'}
 
+    # session state dla zakładek i komunikatów
+    if 'uzytkownicy_tab' not in st.session_state:
+        st.session_state['uzytkownicy_tab'] = 0
+    if 'uzytkownik_add_success' not in st.session_state:
+        st.session_state['uzytkownik_add_success'] = False
+
     tab1, tab2 = st.tabs(["📋 Lista i Edycja", "➕ Zarejestruj nowego"])
+
+    if st.session_state.get('uzytkownik_add_success'):
+        with tab1:
+            st.success("Dodano użytkownika.")
+        st.session_state['uzytkownik_add_success'] = False
 
     # === ZAKŁADKA 1: PRZEGLĄD I EDYCJA ===
     with tab1:
@@ -758,7 +839,8 @@ def view_uzytkownicy_manager():
                 else:
                     success, msg = crud.add_user(n_login, n_haslo, ROLA_MAP[n_rola], n_imie, n_nazwisko, n_email)
                     if success:
-                        st.success(f"Dodano użytkownika {n_login}!")
+                        st.session_state['uzytkownicy_tab'] = 0
+                        st.session_state['uzytkownik_add_success'] = True
                         st.rerun()
                     else:
                         st.error(msg)
@@ -769,18 +851,145 @@ def main():
     st.set_page_config(page_title="System Górski", layout="wide")
 
 
-    menu = {
-        "1. Użytkownicy": view_uzytkownicy_manager,
-        "2. Regiony": view_regiony,
-        "3. Szlaki": view_szlaki_manager,
-        "4. Schroniska": view_schroniska,
-        "5. Pokoje": view_pokoje_manager,
-        "6. Rezerwacje": view_rezerwacje,
-        "7. Wyposażenie": view_wyposazenie_manager
+    menu_schroniska = {
+        "Użytkownicy": view_uzytkownicy_manager,
+        "Regiony": view_regiony,
+        "Schroniska": view_schroniska,
+        "Pokoje": view_pokoje_manager,
+        "Wyposażenie": view_wyposazenie_manager,
+        "Rezerwacje": view_rezerwacje,
+        "Zarządzanie rezerwacjami": view_rezerwacje_manager
     }
+    menu_szlaki = {
+        "Szlaki": view_szlaki_manager,
+        "Punkty": view_punkty_manager,
+        "Odległości między punktami": view_odleglosci_manager,
+        "Kolejności na szlakach": view_kolejnosci_manager
+    }
+    schroniska_keys = list(menu_schroniska.keys())
+    szlaki_keys = list(menu_szlaki.keys())
+    all_menu = schroniska_keys + szlaki_keys
+    choice = st.sidebar.radio("Menu", all_menu, key="main_nav")
+    if choice in menu_schroniska:
+        menu_schroniska[choice]()
+    else:
+        menu_szlaki[choice]()
 
-    sidebar_choice = st.sidebar.radio("Nawigacja", list(menu.keys()))
-    menu[sidebar_choice]()
+def view_punkty_manager():
+    st.header("🗺️ Zarządzanie Punktami")
+    if 'punkty_add_success' not in st.session_state:
+        st.session_state['punkty_add_success'] = False
+    if st.session_state['punkty_add_success']:
+        st.success("Dodano punkt.")
+        st.session_state['punkty_add_success'] = False
+    df = crud.get_punkty()
+    # map region id -> region name for friendlier table
+    regions = crud.get_regiony()
+    region_rev = {row['ID_REGIONU']: row['NAZWA'] for i, row in regions.iterrows()}
+    if not df.empty:
+        df_display = df.copy()
+        df_display['REGION'] = df_display['ID_REGIONU'].map(region_rev).fillna(df_display['ID_REGIONU'])
+        cols = ['ID_PUNKTU', 'NAZWA', 'REGION', 'TYP', 'WYSOKOSC', 'WSPOLRZEDNE_DLUGOSC', 'WSPOLRZEDNE_SZEROKOSC']
+        # Some DBs may use different uppercase names for coordinates; guard by selecting available columns
+        available = [c for c in cols if c in df_display.columns]
+        st.dataframe(df_display[available], width="stretch")
+    else:
+        st.dataframe(df, width="stretch")
+    regiony_df = crud.get_regiony()
+    regiony_map = {row['NAZWA']: row['ID_REGIONU'] for i, row in regiony_df.iterrows()}
+    popularne_typy = [
+        "Schronisko", "Przełęcz", "Szczyt", "Polana", "Rozdroże", "Węzeł szlaków", "Miejscowość", "Jezioro", "Rzeka", "Inny"
+    ]
+    with st.expander("Dodaj punkt"):
+        with st.form("add_punkt_form"):
+            nazwa = st.text_input("Nazwa punktu")
+            region_nazwa = st.selectbox("Region", list(regiony_map.keys()))
+            typ = st.selectbox("Typ punktu", popularne_typy + ["Inny (wpisz własny)"])
+            if typ == "Inny (wpisz własny)":
+                typ = st.text_input("Wpisz własny typ punktu")
+            wysokosc = st.number_input("Wysokość", min_value=0)
+            dlugosc = st.number_input("Długość geograficzna", format="%.6f")
+            szerokosc = st.number_input("Szerokość geograficzna", format="%.6f")
+            submitted = st.form_submit_button("Dodaj")
+            if submitted:
+                id_regionu = regiony_map[region_nazwa]
+                success, msg = crud.add_punkt(id_regionu, nazwa, typ, wysokosc, dlugosc, szerokosc)
+                if success:
+                    st.session_state['punkty_add_success'] = True
+                    safe_rerun()
+                else:
+                    st.error(msg)
+    with st.expander("Usuń punkt"):
+        opts = {f"{row['NAZWA']} (ID: {row['ID_PUNKTU']})": row['ID_PUNKTU'] for i, row in df.iterrows()}
+        sel = st.selectbox("Wybierz punkt", list(opts.keys()))
+        if st.button("Usuń punkt"):
+            success, msg = crud.delete_punkt(opts[sel])
+            if success:
+                st.success("Usunięto punkt.")
+                st.rerun()
+            else:
+                st.error(msg)
 
+def view_odleglosci_manager():
+    st.header("↔️ Odległości między punktami")
+    if 'odl_add_success' not in st.session_state:
+        st.session_state['odl_add_success'] = False
+    if st.session_state['odl_add_success']:
+        st.success("Dodano odległość.")
+        st.session_state['odl_add_success'] = False
+    tab_labels = ["📋 Przegląd i Edycja", "➕ Dodaj odległość"]
+    tab1, tab2 = st.tabs(tab_labels)
+    with tab1:
+        st.subheader("")
+        df = crud.get_odleglosci()
+        # map punkt ids to names for friendlier display
+        punkty_df = crud.get_punkty()
+        punkty_rev = {row['ID_PUNKTU']: row['NAZWA'] for i, row in punkty_df.iterrows()}
+        if not df.empty:
+            df_display = df.copy()
+            df_display['PUNKT_OD'] = df_display['ID_PKT_OD'].map(punkty_rev).fillna(df_display['ID_PKT_OD'])
+            df_display['PUNKT_DO'] = df_display['ID_PKT_DO'].map(punkty_rev).fillna(df_display['ID_PKT_DO'])
+            cols = ['PUNKT_OD', 'PUNKT_DO', 'ODLEGLOSC', 'PRZEWYSZENIE', 'CZAS_PRZEJSCIA']
+            available = [c for c in cols if c in df_display.columns]
+            st.dataframe(df_display[available], width="stretch")
+        else:
+            st.dataframe(df, width="stretch")
+        # Usuwanie odległości (friendly labels)
+        opts = {}
+        for i, row in df.iterrows():
+            od = punkty_rev.get(row['ID_PKT_OD'], row['ID_PKT_OD'])
+            do = punkty_rev.get(row['ID_PKT_DO'], row['ID_PKT_DO'])
+            label = f"{od} -> {do} ({row.get('ODLEGLOSC', '')} km)"
+            opts[label] = (row['ID_PKT_OD'], row['ID_PKT_DO'])
+        sel = st.selectbox("Wybierz odległość do usunięcia", ["-- Wybierz --"] + list(opts.keys()))
+        if sel != "-- Wybierz --":
+            if st.button("Usuń odległość"):
+                id_od, id_do = opts[sel]
+                success, msg = crud.delete_odleglosc(id_od, id_do)
+                if success:
+                    st.success("Usunięto odległość.")
+                    safe_rerun()
+                else:
+                    st.error(msg)
+    with tab2:
+        st.subheader("")
+        # Dodawanie odległości
+        punkty_df = crud.get_punkty()
+        punkty_map = {f"{row['NAZWA']} (ID: {row['ID_PUNKTU']})": row['ID_PUNKTU'] for i, row in punkty_df.iterrows()}
+        with st.form("add_odl_form"):
+            sel_od = st.selectbox("Punkt od", list(punkty_map.keys()), key="odl_od")
+            sel_do = st.selectbox("Punkt do", list(punkty_map.keys()), key="odl_do")
+            odl = st.number_input("Odległość (km)", min_value=0.001, format="%.3f")
+            przew = st.number_input("Przewyższenie (m)", min_value=0.0, format="%.3f")
+            czas = st.number_input("Czas przejścia (min)", min_value=1)
+            if st.form_submit_button("Dodaj"):
+                id_od = punkty_map[sel_od]
+                id_do = punkty_map[sel_do]
+                success, msg = crud.add_odleglosc(id_od, id_do, odl, przew, czas)
+                if success:
+                    st.session_state['odl_add_success'] = True
+                    safe_rerun()
+                else:
+                    st.error(msg)
 if __name__ == "__main__":
     main()
