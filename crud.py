@@ -1,3 +1,12 @@
+# --- ROOM RESERVATIONS (for calendar view) ---
+def get_room_reservations(id_pokoju):
+    sql = """
+        SELECT data_rozpoczecia, data_zakonczenia
+        FROM rezerwacje
+        WHERE id_pokoju = :1 AND status_rez != 'anulowana'
+        ORDER BY data_rozpoczecia
+    """
+    return db.execute_query_df(sql, [id_pokoju])
 import database as db
 import oracledb
 
@@ -85,30 +94,7 @@ def make_reservation(id_pokoju, id_user, osoby, start, end):
     Jeśli pokój jest zajęty, zwraca informację, kiedy się zwolni.
     """
     
-    # 1. Sprawdzenie konfliktów dat i pobranie daty zwolnienia
-    check_sql = """
-        SELECT COUNT(*) as cnt, MAX(data_zakonczenia) as zajete_do
-        FROM rezerwacje 
-        WHERE id_pokoju = :1 
-          AND status_rez != 'anulowana'
-          AND data_rozpoczecia < :2 
-          AND data_zakonczenia > :3
-    """
-    # Parametry: id_pokoju, data_konca_nowej, data_startu_nowej
-    check_df = db.execute_query_df(check_sql, [id_pokoju, end, start])
-    
-    # Jeśli znaleziono chociaż jedną kolizję:
-    if not check_df.empty and check_df.iloc[0]['CNT'] > 0:
-        # Pobieramy datę, kiedy kończy się kolizyjna rezerwacja
-        free_date = check_df.iloc[0]['ZAJETE_DO']
-        try:
-            free_date_str = free_date.strftime('%Y-%m-%d')
-        except:
-            free_date_str = str(free_date).split(' ')[0]
-
-        return False, f"Ten pokój jest już zarezerwowany. Będzie wolny od: {free_date_str}"
-
-    # 2. Sprawdzenie pojemności (Czy pokój w ogóle mieści tyle osób?)
+    # 1. Sprawdzenie pojemności (Czy pokój w ogóle mieści tyle osób?)
     cap_sql = "SELECT liczba_miejsc_calkowita FROM pokoje WHERE id_pokoju = :1"
     cap_df = db.execute_query_df(cap_sql, [id_pokoju])
     
@@ -255,7 +241,13 @@ def add_user(login, haslo, rola, imie, nazwisko, email):
         INSERT INTO uzytkownicy (login, haslo, rola, imie, nazwisko, email)
         VALUES (:1, :2, :3, :4, :5, :6)
     """
-    return db.execute_dml(sql, [login, haslo, rola, imie, nazwisko, email])
+    try:
+        return db.execute_dml(sql, [login, haslo, rola, imie, nazwisko, email])
+    except Exception as e:
+        msg = str(e).lower()
+        if 'unique constraint' in msg and ('login' in msg or 'email' in msg):
+            return False, 'Użytkownik o podanym loginie lub adresie email już istnieje.'
+        return False, f'Błąd: {e}'
 
 def update_user(id_user, login, haslo, rola, imie, nazwisko, email):
     sql = """
@@ -267,3 +259,50 @@ def update_user(id_user, login, haslo, rola, imie, nazwisko, email):
 
 def delete_user(id_user):
     return db.execute_dml("DELETE FROM uzytkownicy WHERE id_uzytkownika = :1", [id_user])
+
+# --- WYPOSAŻENIA ---
+def get_wyposazenia():
+    return db.execute_query_df("SELECT id_wyposazenia, nazwa FROM wyposazenia ORDER BY nazwa")
+
+def add_wyposazenie(nazwa):
+    return db.execute_dml("INSERT INTO wyposazenia (nazwa) VALUES (:1)", [nazwa])
+
+def update_wyposazenie(id_wyposazenia, nazwa):
+    return db.execute_dml("UPDATE wyposazenia SET nazwa = :1 WHERE id_wyposazenia = :2", [nazwa, id_wyposazenia])
+
+def delete_wyposazenie(id_wyposazenia):
+    return db.execute_dml("DELETE FROM wyposazenia WHERE id_wyposazenia = :1", [id_wyposazenia])
+
+# --- SCHRONISKA_WYPOSAŻENIE ---
+def get_schroniska_wyposazenie(id_schroniska):
+    sql = """
+        SELECT w.id_wyposazenia, w.nazwa
+        FROM schroniska_wyposazenie sw
+        JOIN wyposazenia w ON sw.id_wyposazenia = w.id_wyposazenia
+        WHERE sw.id_schroniska = :1
+        ORDER BY w.nazwa
+    """
+    return db.execute_query_df(sql, [id_schroniska])
+
+def add_schronisko_wyposazenie(id_schroniska, id_wyposazenia):
+    return db.execute_dml("INSERT INTO schroniska_wyposazenie (id_schroniska, id_wyposazenia) VALUES (:1, :2)", [id_schroniska, id_wyposazenia])
+
+def delete_schronisko_wyposazenie(id_schroniska, id_wyposazenia):
+    return db.execute_dml("DELETE FROM schroniska_wyposazenie WHERE id_schroniska = :1 AND id_wyposazenia = :2", [id_schroniska, id_wyposazenia])
+
+# --- POKOJE_WYPOSAŻENIE ---
+def get_pokoje_wyposazenie(id_pokoju):
+    sql = """
+        SELECT w.id_wyposazenia, w.nazwa
+        FROM pokoje_wyposazenie pw
+        JOIN wyposazenia w ON pw.id_wyposazenia = w.id_wyposazenia
+        WHERE pw.id_pokoju = :1
+        ORDER BY w.nazwa
+    """
+    return db.execute_query_df(sql, [id_pokoju])
+
+def add_pokoj_wyposazenie(id_pokoju, id_wyposazenia):
+    return db.execute_dml("INSERT INTO pokoje_wyposazenie (id_pokoju, id_wyposazenia) VALUES (:1, :2)", [id_pokoju, id_wyposazenia])
+
+def delete_pokoj_wyposazenie(id_pokoju, id_wyposazenia):
+    return db.execute_dml("DELETE FROM pokoje_wyposazenie WHERE id_pokoju = :1 AND id_wyposazenia = :2", [id_pokoju, id_wyposazenia])

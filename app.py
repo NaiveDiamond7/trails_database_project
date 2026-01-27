@@ -1,8 +1,138 @@
+def view_wyposazenie_manager():
+    st.header("🛠️ Zarządzanie Wyposażeniem")
+
+    tab1, tab2 = st.tabs(["📋 Lista i Edycja", "➕ Dodaj nowe wyposażenie"])
+
+    # --- Tabela i edycja ---
+    with tab1:
+        df = crud.get_wyposazenia()
+        st.dataframe(df, width="stretch")
+
+        st.subheader("Edycja wyposażenia")
+        opts = {row['NAZWA']: row['ID_WYPOSAZENIA'] for i, row in df.iterrows()}
+        sel = st.selectbox("Wybierz wyposażenie do edycji", ["-- Wybierz --"] + list(opts.keys()))
+        if sel != "-- Wybierz --":
+            wid = opts[sel]
+            cur = df[df['ID_WYPOSAZENIA'] == wid].iloc[0]
+            with st.form("edit_wyposazenie_form"):
+                new_name = st.text_input("Nazwa", value=cur['NAZWA'])
+                c1, c2 = st.columns([1,1])
+                if c1.form_submit_button("💾 Zapisz"):
+                    success, msg = crud.update_wyposazenie(wid, new_name)
+                    if success:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                if c2.form_submit_button("🗑️ Usuń", type="primary"):
+                    success, msg = crud.delete_wyposazenie(wid)
+                    if success:
+                        st.warning("Usunięto wyposażenie.")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+    # --- Dodawanie ---
+    with tab2:
+        st.subheader("Dodaj nowe wyposażenie")
+        with st.form("add_wyposazenie_form"):
+            nazwa = st.text_input("Nazwa wyposażenia")
+            if st.form_submit_button("Dodaj"):
+                success, msg = crud.add_wyposazenie(nazwa)
+                if success:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+    st.divider()
+    st.header("🔗 Przypisz wyposażenie do schroniska/pokoju")
+    tab3, tab4 = st.tabs(["Schroniska", "Pokoje"])
+
+    # --- Schroniska ---
+    with tab3:
+        schroniska = crud.get_schroniska_view()
+        sch_map = {row['NAZWA']: row['ID_SCHRONISKA'] for i, row in schroniska.iterrows()}
+        sel_sch = st.selectbox("Schronisko", list(sch_map.keys()), key="wypsch")
+        if sel_sch:
+            sch_id = sch_map[sel_sch]
+            sch_wyposazenie = crud.get_schroniska_wyposazenie(sch_id)
+            all_wyp = crud.get_wyposazenia()
+            st.write("Aktualne wyposażenie:")
+            st.dataframe(sch_wyposazenie, width="stretch")
+            add_opts = {row['NAZWA']: row['ID_WYPOSAZENIA'] for i, row in all_wyp.iterrows() if row['ID_WYPOSAZENIA'] not in sch_wyposazenie['ID_WYPOSAZENIA'].values}
+            del_opts = {row['NAZWA']: row['ID_WYPOSAZENIA'] for i, row in sch_wyposazenie.iterrows()}
+            c1, c2 = st.columns(2)
+            with c1:
+                sel_add = st.selectbox("Dodaj wyposażenie", ["-- Wybierz --"] + list(add_opts.keys()), key="addschwyp")
+                if sel_add != "-- Wybierz --":
+                    if st.button("Dodaj do schroniska"):
+                        if not add_opts[sel_add]:
+                            st.error("Nie wybrano wyposażenia do dodania.")
+                        else:
+                            success, msg = crud.add_schronisko_wyposazenie(sch_id, add_opts[sel_add])
+                            if success:
+                                st.success(msg)
+                                st.rerun()
+                            else:
+                                st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
+            with c2:
+                sel_del = st.selectbox("Usuń wyposażenie", ["-- Wybierz --"] + list(del_opts.keys()), key="delschwyp")
+                if sel_del != "-- Wybierz --":
+                    if st.button("Usuń ze schroniska"):
+                        if not del_opts[sel_del]:
+                            st.error("Nie wybrano wyposażenia do usunięcia.")
+                        else:
+                            success, msg = crud.delete_schronisko_wyposazenie(sch_id, del_opts[sel_del])
+                            if success:
+                                st.warning("Usunięto wyposażenie ze schroniska.")
+                                st.rerun()
+                            else:
+                                st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
+
+    # --- Pokoje ---
+    with tab4:
+        pokoje = crud.get_pokoje_full()
+        pokoje_map = {f"{row['SCHRONISKO']} - Pokój {row['NR_POKOJU']} (ID: {row['ID_POKOJU']})": row['ID_POKOJU'] for i, row in pokoje.iterrows()}
+        sel_pok = st.selectbox("Pokój", list(pokoje_map.keys()), key="wyppok")
+        if sel_pok:
+            pok_id = pokoje_map[sel_pok]
+            pok_wyp = crud.get_pokoje_wyposazenie(pok_id)
+            all_wyp = crud.get_wyposazenia()
+            st.write("Aktualne wyposażenie pokoju:")
+            st.dataframe(pok_wyp, width="stretch")
+            add_opts = {row['NAZWA']: row['ID_WYPOSAZENIA'] for i, row in all_wyp.iterrows() if row['ID_WYPOSAZENIA'] not in pok_wyp['ID_WYPOSAZENIA'].values}
+            del_opts = {row['NAZWA']: row['ID_WYPOSAZENIA'] for i, row in pok_wyp.iterrows()}
+            c1, c2 = st.columns(2)
+            with c1:
+                sel_add = st.selectbox("Dodaj wyposażenie", ["-- Wybierz --"] + list(add_opts.keys()), key="addpokwyp")
+                if sel_add != "-- Wybierz --":
+                    if st.button("Dodaj do pokoju"):
+                        if not add_opts[sel_add]:
+                            st.error("Nie wybrano wyposażenia do dodania.")
+                        else:
+                            success, msg = crud.add_pokoj_wyposazenie(pok_id, add_opts[sel_add])
+                            if success:
+                                st.success(msg)
+                                st.rerun()
+                            else:
+                                st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
+            with c2:
+                sel_del = st.selectbox("Usuń wyposażenie", ["-- Wybierz --"] + list(del_opts.keys()), key="delpokwyp")
+                if sel_del != "-- Wybierz --":
+                    if st.button("Usuń z pokoju"):
+                        if not del_opts[sel_del]:
+                            st.error("Nie wybrano wyposażenia do usunięcia.")
+                        else:
+                            success, msg = crud.delete_pokoj_wyposazenie(pok_id, del_opts[sel_del])
+                            if success:
+                                st.warning("Usunięto wyposażenie z pokoju.")
+                                st.rerun()
+                            else:
+                                st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
 import streamlit as st
 import crud
 import datetime
-
-# --- WIDOKI ---
 
 def view_regiony():
     st.header("Zarządzanie Regionami")
@@ -41,7 +171,21 @@ def view_schroniska():
     # Odwrócona mapa do ustawiania domyślnych wartości w edycji
     reg_rev = {row['ID_REGIONU']: row['NAZWA'] for i, row in reg_df.iterrows()}
 
-    tab1, tab2 = st.tabs(["📋 Lista i Edycja", "➕ Dodaj nowe"])
+    if 'schroniska_tab' not in st.session_state:
+        st.session_state['schroniska_tab'] = 0
+    if 'schronisko_add_success' not in st.session_state:
+        st.session_state['schronisko_add_success'] = False
+
+    tab_labels = ["📋 Lista i Edycja", "➕ Dodaj nowe"]
+    tab_idx = st.session_state['schroniska_tab']
+    tabs = st.tabs(tab_labels)
+    tab1, tab2 = tabs[0], tabs[1]
+
+    # Komunikat o sukcesie po dodaniu
+    if st.session_state['schronisko_add_success']:
+        with tab1:
+            st.success("Schronisko utworzono!")
+        st.session_state['schronisko_add_success'] = False
 
     # === ZAKŁADKA 1: EDYCJA I USUWANIE ===
     with tab1:
@@ -116,22 +260,41 @@ def view_schroniska():
 
     # === ZAKŁADKA 2: DODAWANIE ===
     with tab2:
-        st.subheader("Nowe Schronisko")
-        with st.form("add_schronisko"):
+        st.subheader(":green[Dodaj nowe schronisko]")
+        st.markdown("""
+        <style>
+        .schronisko-form .stTextInput>div>input, .schronisko-form .stNumberInput>div>input, .schronisko-form .stSelectbox>div>div {background: #f6f6f6; border-radius: 6px;}
+        .schronisko-form .stTimeInput>div>input {background: #f6f6f6; border-radius: 6px;}
+        </style>
+        """, unsafe_allow_html=True)
+        with st.form("add_schronisko", clear_on_submit=True):
+            st.markdown('<div class="schronisko-form">', unsafe_allow_html=True)
             col1, col2 = st.columns(2)
             with col1:
-                nazwa = st.text_input("Nazwa")
+                nazwa = st.text_input("Nazwa schroniska", placeholder="Podaj nazwę schroniska")
                 region = st.selectbox("Region", list(reg_opts.keys()), key="add_reg_sel")
-                wys = st.number_input("Wysokość [m.n.p.m.]", 1, 8850)
+                wys = st.number_input("Wysokość [m n.p.m.]", min_value=1, max_value=8850, value=1000, step=1)
             with col2:
-                otw = st.time_input("Otwarcie", datetime.time(8,0))
-                zam = st.time_input("Zamknięcie", datetime.time(20,0))
-            
-            if st.form_submit_button("Dodaj"):
-                success, msg = crud.add_schronisko_transaction(
-                    reg_opts[region], nazwa, wys, 
-                    otw.strftime("%H:%M"), zam.strftime("%H:%M")
-                )
+                otw = st.time_input("Godzina otwarcia", datetime.time(8,0))
+                zam = st.time_input("Godzina zamknięcia", datetime.time(20,0))
+            st.markdown('</div>', unsafe_allow_html=True)
+            submitted = st.form_submit_button(":heavy_plus_sign: Dodaj schronisko")
+            if submitted:
+                if not nazwa.strip():
+                    st.error("Nazwa schroniska nie może być pusta.")
+                elif len(nazwa.strip()) > 100:
+                    st.error("Nazwa schroniska nie może przekraczać 100 znaków.")
+                else:
+                    success, msg = crud.add_schronisko_transaction(
+                        reg_opts[region], nazwa.strip(), wys, 
+                        otw.strftime("%H:%M"), zam.strftime("%H:%M")
+                    )
+                    if success:
+                        st.session_state['schroniska_tab'] = 0
+                        st.session_state['schronisko_add_success'] = True
+                        st.rerun()
+                    else:
+                        st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
                 if success:
                     st.success("Dodano!")
                     st.rerun()
@@ -140,64 +303,87 @@ def view_schroniska():
 
 def view_rezerwacje():
     st.header("Rezerwacje")
-    
     # 1. WYBÓR UŻYTKOWNIKA
     users = crud.get_users_dict()
     if not users:
         st.error("Brak użytkowników.")
         return
-    
-    col_u1, col_u2 = st.columns([1, 2])
-    with col_u1:
-        u_label = st.selectbox("Użytkownik (Rezerwujący)", list(users.keys()))
-        u_id = users[u_label]
+    u_label = st.selectbox("Wybierz użytkownika", list(users.keys()))
+    u_id = users[u_label]
 
-    # 2. NOWA REZERWACJA (Formularz)
-    with st.expander("➕ Nowa rezerwacja", expanded=True): # Zmieniłem na expanded=True dla wygody testowania
-        schroniska = crud.get_schroniska_view()
-        if schroniska.empty:
-            st.warning("Brak schronisk.")
+    st.divider()
+    st.subheader("Nowa rezerwacja")
+    # --- FORMULARZ DODAWANIA REZERWACJI ---
+    pokoje = crud.get_pokoje_full()
+    if pokoje.empty:
+        st.info("Brak pokoi do rezerwacji.")
+    else:
+        schroniska = pokoje['SCHRONISKO'].unique().tolist()
+        schronisko_sel = st.selectbox("Schronisko", schroniska)
+        pokoje_w_schronisku = pokoje[pokoje['SCHRONISKO'] == schronisko_sel]
+        if pokoje_w_schronisku.empty:
+            st.info("Brak pokoi w wybranym schronisku.")
         else:
-            s_opts = {row['NAZWA']: row['ID_SCHRONISKA'] for i, row in schroniska.iterrows()}
-            sel_sch = st.selectbox("Schronisko", list(s_opts.keys()))
-            
-            if sel_sch:
-                pokoje = crud.get_pokoje_in_schronisko(s_opts[sel_sch])
-                if pokoje.empty:
-                    st.warning("Brak pokoi.")
-                else:
-                    capacity_map = {row['ID_POKOJU']: int(row['LICZBA_MIEJSC_CALKOWITA']) for i, row in pokoje.iterrows()}
-                    
-                    p_opts = {
-                        f"Pokój {row['NR_POKOJU']} (Max: {row['LICZBA_MIEJSC_CALKOWITA']} os., {row['CENA_ZA_NOC']} PLN)": row['ID_POKOJU'] 
-                        for i, row in pokoje.iterrows()
-                    }
-                    
-                    sel_pok_label = st.selectbox("Pokój", list(p_opts.keys()))
-                    sel_pok_id = p_opts[sel_pok_label]
-                    
-                    # Pobieramy max miejsc dla wybranego pokoju
-                    max_osob = capacity_map[sel_pok_id]
-                    
-                    c1, c2 = st.columns(2)
-                    d_start = c1.date_input("Od", datetime.date.today())
-                    d_end = c2.date_input("Do", datetime.date.today() + datetime.timedelta(days=1))
-                    
-                    # ZMIANA: Zamiast Slidera -> Selectbox z listą od 1 do max_osob
-                    osoby_options = list(range(1, max_osob + 1))
-                    osoby = st.selectbox("Liczba osób", osoby_options)
-
-                    col_btn1, col_btn2 = st.columns(2)
-                    if col_btn1.button("Oblicz koszt"):
-                        if d_end <= d_start:
-                            st.error("Data końcowa musi być późniejsza.")
+            capacity_map = {row['ID_POKOJU']: int(row['LICZBA_MIEJSC_CALKOWITA']) for i, row in pokoje_w_schronisku.iterrows()}
+            p_opts = {
+                f"Pokój {row['NR_POKOJU']} (Cena: {row['CENA_ZA_NOC']} PLN, Max: {row['LICZBA_MIEJSC_CALKOWITA']})": row['ID_POKOJU']
+                for i, row in pokoje_w_schronisku.iterrows()
+            }
+            with st.form("add_reservation_form", clear_on_submit=True):
+                sel_pok_label = st.selectbox("Pokój", list(p_opts.keys()))
+                sel_pok_id = p_opts[sel_pok_label]
+                max_osob = capacity_map[sel_pok_id]
+                c1, c2 = st.columns(2)
+                d_start = c1.date_input("Od", datetime.date.today())
+                d_end = c2.date_input("Do", datetime.date.today() + datetime.timedelta(days=1))
+                osoby_options = list(range(1, max_osob + 1))
+                osoby = st.selectbox("Liczba osób", osoby_options)
+                # --- PODGLĄD ZAJĘTOŚCI ---
+                st.markdown("**Podgląd zajętości pokoju:**")
+                import pandas as pd
+                import calendar
+                res_df = crud.get_room_reservations(sel_pok_id)
+                # Przygotuj słownik: dzień -> liczba osób zarezerwowanych
+                busy_count = {}
+                for i, row in res_df.iterrows():
+                    rng = pd.date_range(row['DATA_ROZPOCZECIA'], row['DATA_ZAKONCZENIA'] - pd.Timedelta(days=1))
+                    for d in rng.date:
+                        busy_count[d] = busy_count.get(d, 0) + int(row.get('LICZBA_OSOB', 1))
+                # Kalendarz na bieżący miesiąc
+                today = datetime.date.today()
+                cal = calendar.Calendar()
+                days = list(cal.itermonthdates(today.year, today.month))
+                cal_row = []
+                for d in days:
+                    if d.month != today.month:
+                        cal_row.append("⬜")
+                    else:
+                        occ = busy_count.get(d, 0)
+                        if occ >= max_osob:
+                            cal_row.append("🔴")
+                        elif occ > 0:
+                            cal_row.append("🟡")
                         else:
-                            val = crud.calculate_cost(sel_pok_id, d_start, d_end, osoby)
-                            st.info(f"Koszt: {val} PLN")
-
-                    if col_btn2.button("Rezerwuj", type="primary"):
-                        if d_end <= d_start:
-                            st.error("Data końcowa musi być późniejsza.")
+                            cal_row.append("🟢")
+                # Wyświetl kalendarz (7 dni w tygodniu)
+                st.markdown("Dni zajęte: 🔴  |  częściowo zajęte: 🟡  |  wolne: 🟢  |  poza miesiącem: ⬜")
+                for i in range(0, len(cal_row), 7):
+                    st.markdown(" ".join(cal_row[i:i+7]))
+                # ---
+                if st.form_submit_button("Zarezerwuj"):
+                    if d_end <= d_start:
+                        st.error("Data końcowa musi być późniejsza.")
+                    else:
+                        wybrane = list(pd.date_range(d_start, d_end - datetime.timedelta(days=1)).date)
+                        # Sprawdź dostępność na każdy dzień
+                        can_reserve = True
+                        for d in wybrane:
+                            occ = busy_count.get(d, 0)
+                            if occ + osoby > max_osob:
+                                can_reserve = False
+                                break
+                        if not can_reserve:
+                            st.error("Wybrany termin przekracza pojemność pokoju w niektóre dni!")
                         else:
                             success, msg = crud.make_reservation(sel_pok_id, u_id, osoby, d_start, d_end)
                             if success:
@@ -206,40 +392,13 @@ def view_rezerwacje():
                             else:
                                 st.error(msg)
 
-    # 3. ZARZĄDZANIE REZERWACJAMI UŻYTKOWNIKA (USUWANIE)
-    st.subheader(f"Aktywne rezerwacje użytkownika: {u_label.split(' (')[0]}")
-    
-    user_res_df = crud.get_user_reservations(u_id)
-    
-    if user_res_df.empty:
-        st.info("Ten użytkownik nie ma żadnych rezerwacji.")
-    else:
-        res_opts = {}
-        for i, row in user_res_df.iterrows():
-            label = f"ID: {row['ID_REZERWACJI']} | {row['SCHRONISKO']} (P. {row['NR_POKOJU']}) | {row['DATA_ROZPOCZECIA']} - {row['DATA_ZAKONCZENIA']}"
-            res_opts[label] = row['ID_REZERWACJI']
-        
-        col_del1, col_del2 = st.columns([3, 1])
-        sel_res_to_del = col_del1.selectbox("Wybierz rezerwację do anulowania", list(res_opts.keys()))
-        
-        if col_del2.button("🗑️ Anuluj rezerwację"):
-            res_id_del = res_opts[sel_res_to_del]
-            success, msg = crud.delete_reservation(res_id_del)
-            if success:
-                st.success("Rezerwacja została anulowana, a miejsca zwolnione.")
-                st.rerun()
-            else:
-                st.error(msg)
-    
     # --- TABELA HISTORII ---
     st.divider()
     st.subheader("Globalna historia rezerwacji")
-    
     df_rez = crud.get_all_reservations()
-    
     show_only_selected = st.checkbox("Pokaż tylko dla wybranego użytkownika")
     if show_only_selected:
-         st.dataframe(crud.get_user_reservations(u_id), width="stretch")
+        st.dataframe(crud.get_user_reservations(u_id), width="stretch")
     else:
         st.dataframe(df_rez, width="stretch")
 
@@ -386,8 +545,22 @@ def view_szlaki_manager():
 def view_pokoje_manager():
     st.header("🏢 Zarządzanie Pokojami")
 
-    # Tworzymy zakładki
-    tab1, tab2 = st.tabs(["📋 Przegląd i Edycja", "➕ Dodaj nowy pokój"])
+    # Ustawienia session_state dla tabów i komunikatów
+    if 'pokoje_tab' not in st.session_state:
+        st.session_state['pokoje_tab'] = 0
+    if 'pokoj_add_success' not in st.session_state:
+        st.session_state['pokoj_add_success'] = False
+
+    tab_labels = ["📋 Przegląd i Edycja", "➕ Dodaj nowy pokój"]
+    tab_idx = st.session_state['pokoje_tab']
+    tabs = st.tabs(tab_labels)
+    tab1, tab2 = tabs[0], tabs[1]
+
+    # Komunikat o sukcesie po dodaniu
+    if st.session_state['pokoj_add_success']:
+        with tab1:
+            st.success("Pokój dodany!")
+        st.session_state['pokoj_add_success'] = False
 
     # === ZAKŁADKA 1: Przeglądanie, Wyszukiwanie, Edycja, Usuwanie ===
     with tab1:
@@ -434,16 +607,22 @@ def view_pokoje_manager():
                     new_places = st.number_input("Liczba miejsc", 
                                                  min_value=1, max_value=50, 
                                                  value=int(current_data['LICZBA_MIEJSC_CALKOWITA']))
-                with c2:
-                    st.text_input("Numer pokoju", value=current_data['NR_POKOJU'], disabled=True)
-                    new_price = st.number_input("Cena za noc (PLN)", 
-                                                min_value=0.0, 
-                                                value=float(current_data['CENA_ZA_NOC']), step=10.0)
-
-                col_save, col_del = st.columns([1, 4])
-                with col_save:
-                    if st.form_submit_button("💾 Zapisz zmiany"):
-                        success, msg = crud.update_pokoj(selected_id, new_price, new_places)
+                with tab2:
+                    st.subheader("Dodaj nowe wyposażenie")
+                    with st.form("add_wyposazenie_form"):
+                        nazwa = st.text_input("Nazwa wyposażenia")
+                        if st.form_submit_button("Dodaj"):
+                            if not nazwa.strip():
+                                st.error("Nazwa wyposażenia nie może być pusta.")
+                            elif len(nazwa.strip()) > 100:
+                                st.error("Nazwa wyposażenia nie może przekraczać 100 znaków.")
+                            else:
+                                success, msg = crud.add_wyposazenie(nazwa.strip())
+                                if success:
+                                    st.success(msg)
+                                    st.rerun()
+                                else:
+                                    st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
                         if success:
                             st.success("Zaktualizowano!")
                             st.rerun()
@@ -462,37 +641,28 @@ def view_pokoje_manager():
     # === ZAKŁADKA 2: Dodawanie nowego pokoju ===
     with tab2:
         st.subheader("Definicja nowego pokoju")
-        
         # Potrzebujemy listy schronisk do dropdowna
-        # Wykorzystujemy istniejącą funkcję z crud
         schroniska_df = crud.get_schroniska_view()
-        # Mapa: "Nazwa Schroniska" -> ID
         schroniska_map = {row['NAZWA']: row['ID_SCHRONISKA'] for i, row in schroniska_df.iterrows()}
 
-        with st.form("add_pokoj_form"):
+        with st.form("add_pokoj_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            
             with col1:
-                sel_schronisko = st.selectbox("Wybierz schronisko", list(schroniska_map.keys()))
-                n_miejsca = st.number_input("Liczba miejsc", min_value=1, max_value=20, value=2)
-            
+                sel_schronisko = st.selectbox("Wybierz schronisko", list(schroniska_map.keys()), key="add_pokoj_schronisko")
+                n_miejsca = st.number_input("Liczba miejsc", min_value=1, max_value=20, value=2, key="add_pokoj_miejsca")
             with col2:
-                n_nr = st.number_input("Numer pokoju", min_value=1, value=101)
-                n_cena = st.number_input("Cena za noc (PLN)", min_value=0.0, value=50.0, step=5.0)
-
+                n_nr = st.number_input("Numer pokoju", min_value=1, value=101, key="add_pokoj_nr")
+                n_cena = st.number_input("Cena za noc (PLN)", min_value=0.0, value=50.0, step=5.0, key="add_pokoj_cena")
             submitted = st.form_submit_button("Dodaj pokój")
-            
             if submitted:
-                # Pobieramy ID schroniska z mapy
                 id_sch = schroniska_map[sel_schronisko]
-                
                 success, msg = crud.add_pokoj(id_sch, n_nr, n_miejsca, n_cena)
                 if success:
-                    st.success(f"Dodano pokój {n_nr} do schroniska {sel_schronisko}!")
-                    # Rerun jest ważny, żeby nowy pokój pojawił się od razu w tabeli w zakładce 1
+                    st.session_state['pokoje_tab'] = 0
+                    st.session_state['pokoj_add_success'] = True
                     st.rerun()
                 else:
-                    st.error(msg)
+                    st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
 
 def view_uzytkownicy_manager():
     st.header("👥 Zarządzanie Użytkownikami")
@@ -595,8 +765,9 @@ def view_uzytkownicy_manager():
 
 # --- MAIN ---
 def main():
+
     st.set_page_config(page_title="System Górski", layout="wide")
-    st.title("🏔️ System Zarządzania Bazą Górską")
+
 
     menu = {
         "1. Użytkownicy": view_uzytkownicy_manager,
@@ -604,11 +775,11 @@ def main():
         "3. Szlaki": view_szlaki_manager,
         "4. Schroniska": view_schroniska,
         "5. Pokoje": view_pokoje_manager,
-        "6. Rezerwacje": view_rezerwacje
+        "6. Rezerwacje": view_rezerwacje,
+        "7. Wyposażenie": view_wyposazenie_manager
     }
-    
+
     sidebar_choice = st.sidebar.radio("Nawigacja", list(menu.keys()))
-    
     menu[sidebar_choice]()
 
 if __name__ == "__main__":

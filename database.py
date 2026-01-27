@@ -36,18 +36,23 @@ def execute_dml(query, params):
         cursor.execute(query, params)
         conn.commit()
         return True, "Operacja zakończona sukcesem."
-    except oracledb.IntegrityError as e:
-        error_obj = e.args[0]
-        if "ORA-00001" in error_obj.message:
-            return False, "Błąd: Taki wpis już istnieje."
-        elif "ORA-02292" in error_obj.message:
-            return False, "Błąd: Element jest używany w innej tabeli."
-        elif "ORA-02290" in error_obj.message:
-            return False, f"Błąd walidacji (Check Constraint): {error_obj.message}"
-        else:
-            return False, f"Błąd bazy: {error_obj.message}"
     except Exception as e:
-        return False, f"Błąd systemowy: {str(e)}"
+        msg = str(e)
+        # Typowe błędy Oracle
+        if "ORA-00001" in msg:
+            return False, "Taki wpis już istnieje. Zmień dane lub wybierz inną nazwę."
+        if "ORA-02292" in msg:
+            return False, "Nie można usunąć, bo element jest powiązany z innymi danymi."
+        if "ORA-02290" in msg:
+            return False, "Wprowadzone dane nie spełniają wymagań (np. ograniczenia liczby znaków, zakresu lub formatu)."
+        if "ORA-12899" in msg:
+            return False, "Za długa wartość w jednym z pól tekstowych. Skróć dane."
+        if "ORA-01400" in msg:
+            return False, "Pole wymagane nie może być puste. Uzupełnij wszystkie wymagane pola."
+        if "ORA-01438" in msg:
+            return False, "Wartość liczby jest za duża dla tego pola."
+        # Inne
+        return False, f"Błąd: {msg.split(':')[-1].strip()}"
     finally:
         cursor.close()
         conn.close()
@@ -59,9 +64,22 @@ def execute_procedure(name, params):
     try:
         cursor.callproc(name, params)
         conn.commit()
-        return True, "Procedura wykonana pomyślnie."
+        return True, "Operacja zakończona sukcesem."
     except Exception as e:
-        return False, f"Błąd procedury: {str(e)}"
+        msg = str(e)
+        if "ORA-00001" in msg:
+            return False, "Taki wpis już istnieje. Zmień dane lub wybierz inną nazwę."
+        if "ORA-02292" in msg:
+            return False, "Nie można usunąć, bo element jest powiązany z innymi danymi."
+        if "ORA-02290" in msg:
+            return False, "Wprowadzone dane nie spełniają wymagań (np. ograniczenia liczby znaków, zakresu lub formatu)."
+        if "ORA-12899" in msg:
+            return False, "Za długa wartość w jednym z pól tekstowych. Skróć dane."
+        if "ORA-01400" in msg:
+            return False, "Pole wymagane nie może być puste. Uzupełnij wszystkie wymagane pola."
+        if "ORA-01438" in msg:
+            return False, "Wartość liczby jest za duża dla tego pola."
+        return False, f"Błąd: {msg.split(':')[-1].strip()}"
     finally:
         cursor.close()
         conn.close()
@@ -73,6 +91,8 @@ def execute_function(name, return_type, params):
     try:
         return cursor.callfunc(name, return_type, params)
     except Exception as e:
+        msg = str(e)
+        # Można dodać obsługę typowych błędów jak wyżej, jeśli funkcje będą zwracać błędy
         return None
     finally:
         cursor.close()
