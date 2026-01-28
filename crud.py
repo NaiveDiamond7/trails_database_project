@@ -201,6 +201,19 @@ def get_szlaki():
     return db.execute_query_df(sql)
 
 def add_szlak(id_regionu, nazwa, kolor, trudnosc, dlugosc, czas):
+
+    check_sql = """
+        SELECT COUNT(*) as cnt 
+        FROM szlaki 
+        WHERE id_regionu = :1 
+          AND UPPER(nazwa) = UPPER(:2) 
+          AND kolor = :3
+    """
+    check_df = db.execute_query_df(check_sql, [id_regionu, nazwa, kolor])
+    
+    if not check_df.empty and check_df.iloc[0]['CNT'] > 0:
+        return False, f"Szlak '{nazwa}' w tym kolorze i regionie już istnieje."
+
     sql = """
         INSERT INTO szlaki (id_regionu, nazwa, kolor, trudnosc, dlugosc, czas_przejscia)
         VALUES (:1, :2, :3, :4, :5, :6)

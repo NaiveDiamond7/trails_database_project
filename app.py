@@ -3,16 +3,13 @@ def view_kolejnosci_manager():
 
     if 'kol_add_success' not in st.session_state:
         st.session_state['kol_add_success'] = False
-    if st.session_state.get('kol_add_success'):
-        st.success("Dodano kolejność.")
-        st.session_state['kol_add_success'] = False
 
     df = crud.get_kolejnosci()
 
     szlaki_df = crud.get_szlaki()
     szlaki_rev = {row['ID_SZLAKU']: row['NAZWA'] for i, row in szlaki_df.iterrows()}
-
     szlaki_map = {f"{row['NAZWA']} (ID: {row['ID_SZLAKU']})": row['ID_SZLAKU'] for i, row in szlaki_df.iterrows()}
+    
     punkty_df = crud.get_punkty()
     punkty_rev = {row['ID_PUNKTU']: row['NAZWA'] for i, row in punkty_df.iterrows()}
     punkty_map = {f"{row['NAZWA']} (ID: {row['ID_PUNKTU']})": row['ID_PUNKTU'] for i, row in punkty_df.iterrows()}
@@ -39,8 +36,16 @@ def view_kolejnosci_manager():
             sname = szlaki_rev.get(row['ID_SZLAKU_KOL'], row['ID_SZLAKU_KOL'])
             pname = punkty_rev.get(row['ID_PUNKTU'], row['ID_PUNKTU'])
             label = f"{sname} - {pname} (kolejność {row['KOLEJNOSC_NA_SZLAKU']})"
-            opts[label] = (row['ID_SZLAKU_KOL'], row['ID_PUNKTU'], row['KOLEJNOSC_NA_SZLAKU'])
+            
+            # --- POPRAWKA: Rzutowanie numpy.int64 na python int ---
+            val_szlak = int(row['ID_SZLAKU_KOL'])
+            val_punkt = int(row['ID_PUNKTU'])
+            val_kol = int(row['KOLEJNOSC_NA_SZLAKU'])
+            
+            opts[label] = (val_szlak, val_punkt, val_kol)
+            
         sel = st.selectbox("Wybierz kolejność", ["-- Wybierz --"] + list(opts.keys()))
+        
         if sel != "-- Wybierz --":
             if st.button("Usuń kolejność"):
                 id_szlaku, id_punktu, kolejnosc = opts[sel]
@@ -56,6 +61,7 @@ def view_kolejnosci_manager():
             sel_szlak = st.selectbox("Szlak", list(szlaki_map.keys()), key="kol_szlak")
             sel_punkt = st.selectbox("Punkt", list(punkty_map.keys()), key="kol_punkt")
             kolejnosc = st.number_input("Kolejność na szlaku", min_value=1)
+            
             if st.form_submit_button("Dodaj"):
                 id_szlaku = szlaki_map[sel_szlak]
                 id_punktu = punkty_map[sel_punkt]
@@ -351,6 +357,7 @@ def view_schroniska():
                 zam = st.time_input("Godzina zamknięcia", datetime.time(20,0))
             st.markdown('</div>', unsafe_allow_html=True)
             submitted = st.form_submit_button(":heavy_plus_sign: Dodaj schronisko")
+            
             if submitted:
                 if not nazwa.strip():
                     st.error("Nazwa schroniska nie może być pusta.")
@@ -362,17 +369,13 @@ def view_schroniska():
                         otw.strftime("%H:%M"), zam.strftime("%H:%M"),
                         0, 0
                     )
+                    
                     if success:
                         st.session_state['schroniska_tab'] = 0
                         st.session_state['schronisko_add_success'] = True
                         st.rerun()
                     else:
                         st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
-                if success:
-                    st.success("Dodano!")
-                    st.rerun()
-                else:
-                    st.error(msg)
 
 def view_rezerwacje():
     st.header("Rezerwacje")
