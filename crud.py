@@ -11,12 +11,53 @@ def get_room_reservations(id_pokoju):
         ORDER BY data_rozpoczecia
     """
     return db.execute_query_df(sql, [id_pokoju])
+import database as db
+import oracledb
+import re
+
+# --- Validation helpers ---
+def _is_nonempty_str(s):
+    return s is not None and str(s).strip() != ''
+
+def _is_positive_number(x):
+    try:
+        return float(x) > 0
+    except Exception:
+        return False
+
+def _is_valid_height(h):
+    try:
+        v = float(h)
+        return 0 <= v <= 8851
+    except Exception:
+        return False
+
+def _is_valid_coord_lon(x):
+    try:
+        v = float(x)
+        return -180 <= v <= 180
+    except Exception:
+        return False
+
+def _is_valid_coord_lat(x):
+    try:
+        v = float(x)
+        return -90 <= v <= 90
+    except Exception:
+        return False
+
+def _is_valid_time_hhmm(t):
+    if not _is_nonempty_str(t):
+        return False
+    return re.match(r'^([0-1][0-9]|2[0-3]):[0-5][0-9]$', str(t)) is not None
 
 # --- REGIONY ---
 def get_regiony():
     return db.execute_query_df("SELECT id_regionu, nazwa FROM regiony ORDER BY id_regionu")
 
 def add_region(nazwa):
+    if not _is_nonempty_str(nazwa):
+        return False, 'Pole "nazwa" jest wymagane.'
     return db.execute_dml("INSERT INTO regiony (nazwa) VALUES (:1)", [nazwa])
 
 def delete_region(id_regionu):
@@ -47,10 +88,25 @@ def add_schronisko_transaction(id_region, nazwa, wysokosc, otwarcie, zamkniecie,
     END;
     """
     # binding order: id_region, nazwa, wysokosc, dlugosc, szerokosc, otwarcie, zamkniecie
+    if not _is_nonempty_str(nazwa):
+        return False, 'Pole "nazwa" jest wymagane.'
+    if not _is_valid_height(wysokosc):
+        return False, 'Nieprawidłowa wartość "wysokosc".'
+    if not _is_valid_coord_lon(dlugosc) or not _is_valid_coord_lat(szerokosc):
+        return False, 'Nieprawidłowe współrzędne.'
+    if not _is_valid_time_hhmm(otwarcie) or not _is_valid_time_hhmm(zamkniecie):
+        return False, 'Nieprawidłowy format godzin (HH:MM).'
     params = [id_region, nazwa, wysokosc, dlugosc, szerokosc, otwarcie, zamkniecie]
     return db.execute_dml(sql, params)
 
 def update_schronisko(id_schroniska, id_regionu, nazwa, wysokosc, otwarcie, zamkniecie):
+    if not _is_nonempty_str(nazwa):
+        return False, 'Pole "nazwa" jest wymagane.'
+    if not _is_valid_height(wysokosc):
+        return False, 'Nieprawidłowa wartość "wysokosc".'
+    if not _is_valid_time_hhmm(otwarcie) or not _is_valid_time_hhmm(zamkniecie):
+        return False, 'Nieprawidłowy format godzin (HH:MM).'
+
     sql = """
     BEGIN
         UPDATE punkty 
@@ -218,6 +274,18 @@ def add_szlak(id_regionu, nazwa, kolor, trudnosc, dlugosc, czas):
         INSERT INTO szlaki (id_regionu, nazwa, kolor, trudnosc, dlugosc, czas_przejscia)
         VALUES (:1, :2, :3, :4, :5, :6)
     """
+    KOLORY = {'CZERWONY', 'NIEBIESKI', 'ZIELONY', 'ZOLTY', 'CZARNY', 'INNY'}
+    TRUDNOSCI = {'SPACEROWY', 'BARDZO LATWY', 'LATWY', 'SREDNIOZAAWANSOWANY', 'ZAAWANSOWANY', 'EKSPERCKI'}
+    if not _is_nonempty_str(nazwa):
+        return False, 'Pole "nazwa" jest wymagane.'
+    if kolor not in KOLORY:
+        return False, f'Nieprawidłowy kolor. Dozwolone: {", ".join(KOLORY)}'
+    if trudnosc not in TRUDNOSCI:
+        return False, f'Nieprawidłowa trudność. Dozwolone: {", ".join(TRUDNOSCI)}'
+    if not _is_positive_number(dlugosc):
+        return False, 'Pole "dlugosc" musi być dodatnią liczbą.'
+    if not _is_positive_number(czas):
+        return False, 'Pole "czas" musi być dodatnią liczbą.'
     return db.execute_dml(sql, [id_regionu, nazwa, kolor, trudnosc, dlugosc, czas])
 
 def update_szlak(id_szlaku, nazwa, kolor, trudnosc, dlugosc, czas):
@@ -226,10 +294,28 @@ def update_szlak(id_szlaku, nazwa, kolor, trudnosc, dlugosc, czas):
         SET nazwa = :1, kolor = :2, trudnosc = :3, dlugosc = :4, czas_przejscia = :5
         WHERE id_szlaku = :6
     """
+    KOLORY = {'CZERWONY', 'NIEBIESKI', 'ZIELONY', 'ZOLTY', 'CZARNY', 'INNY'}
+    TRUDNOSCI = {'SPACEROWY', 'BARDZO LATWY', 'LATWY', 'SREDNIOZAAWANSOWANY', 'ZAAWANSOWANY', 'EKSPERCKI'}
+    if not _is_nonempty_str(nazwa):
+        return False, 'Pole "nazwa" jest wymagane.'
+    if kolor not in KOLORY:
+        return False, 'Nieprawidłowy kolor.'
+    if trudnosc not in TRUDNOSCI:
+        return False, 'Nieprawidłowa trudność.'
+    if not _is_positive_number(dlugosc):
+        return False, 'Pole "dlugosc" musi być dodatnią liczbą.'
+    if not _is_positive_number(czas):
+        return False, 'Pole "czas" musi być dodatnią liczbą.'
     return db.execute_dml(sql, [nazwa, kolor, trudnosc, dlugosc, czas, id_szlaku])
 
 def delete_szlak(id_szlaku):
-    return db.execute_dml("DELETE FROM szlaki WHERE id_szlaku = :1", [id_szlaku])
+    sql = """
+    BEGIN
+        DELETE FROM kolejnosci WHERE id_szlaku_kol = :1;
+        DELETE FROM szlaki WHERE id_szlaku = :1;
+    END;
+    """
+    return db.execute_dml(sql, [id_szlaku])
 
 # --- POKOJE ---
 def get_pokoje_full():
@@ -296,6 +382,15 @@ def add_pokoj(id_schroniska, nr_pokoju, miejsca, cena):
         END;
     END;
     """
+    if not _is_positive_number(miejsca):
+        return False, 'Pole "miejsca" musi być dodatnią liczbą.'
+    if not _is_positive_number(cena):
+        return False, 'Pole "cena" musi być dodatnią liczbą.'
+    try:
+        if int(nr_pokoju) <= 0:
+            return False, 'Numer pokoju musi być dodatnią liczbą.'
+    except Exception:
+        return False, 'Nieprawidłowy numer pokoju.'
     return db.execute_dml(sql, [id_schroniska, nr_pokoju, miejsca, cena])
 
 # --- UZYTKOWNICY ---
@@ -311,6 +406,9 @@ def add_user(login, haslo, rola, imie, nazwisko, email):
         INSERT INTO uzytkownicy (login, haslo, rola, imie, nazwisko, email)
         VALUES (:1, :2, :3, :4, :5, :6)
     """
+    # enforce required first name at application level
+    if not imie or str(imie).strip() == '':
+        return False, 'Pole "imie" jest wymagane.'
     try:
         return db.execute_dml(sql, [login, haslo, rola, imie, nazwisko, email])
     except Exception as e:
@@ -380,25 +478,64 @@ def get_punkty():
     return db.execute_query_df("SELECT id_punktu, id_regionu, nazwa, typ, wysokosc, wspolrzedne_dlugosc, wspolrzedne_szerokosc FROM punkty ORDER BY id_punktu")
 
 def add_punkt(id_regionu, nazwa, typ, wysokosc, dlugosc, szerokosc):
+    if not _is_nonempty_str(nazwa):
+        return False, 'Pole "nazwa" jest wymagane.'
+    if not _is_nonempty_str(typ):
+        return False, 'Pole "typ" jest wymagane.'
+    if not _is_valid_height(wysokosc):
+        return False, 'Nieprawidłowa wartość "wysokosc".'
+    if not _is_valid_coord_lon(dlugosc) or not _is_valid_coord_lat(szerokosc):
+        return False, 'Nieprawidłowe współrzędne.'
     sql = "INSERT INTO punkty (id_regionu, nazwa, typ, wysokosc, wspolrzedne_dlugosc, wspolrzedne_szerokosc) VALUES (:1, :2, :3, :4, :5, :6)"
     return db.execute_dml(sql, [id_regionu, nazwa, typ, wysokosc, dlugosc, szerokosc])
 
 def update_punkt(id_punktu, id_regionu, nazwa, typ, wysokosc, dlugosc, szerokosc):
+    if not _is_nonempty_str(nazwa):
+        return False, 'Pole "nazwa" jest wymagane.'
+    if not _is_nonempty_str(typ):
+        return False, 'Pole "typ" jest wymagane.'
+    if not _is_valid_height(wysokosc):
+        return False, 'Nieprawidłowa wartość "wysokosc".'
+    if not _is_valid_coord_lon(dlugosc) or not _is_valid_coord_lat(szerokosc):
+        return False, 'Nieprawidłowe współrzędne.'
     sql = "UPDATE punkty SET id_regionu = :1, nazwa = :2, typ = :3, wysokosc = :4, wspolrzedne_dlugosc = :5, wspolrzedne_szerokosc = :6 WHERE id_punktu = :7"
     return db.execute_dml(sql, [id_regionu, nazwa, typ, wysokosc, dlugosc, szerokosc, id_punktu])
 
 def delete_punkt(id_punktu):
-    return db.execute_dml("DELETE FROM punkty WHERE id_punktu = :1", [id_punktu])
+    sql = """
+    DECLARE
+    BEGIN
+        -- remove any distances involving this point
+        DELETE FROM odleglosci_miedzy_punktami WHERE id_pkt_od = :1 OR id_pkt_do = :1;
+        -- remove any sequence entries referencing this point
+        DELETE FROM kolejnosci WHERE id_punktu = :1;
+        -- finally remove the point itself
+        DELETE FROM punkty WHERE id_punktu = :1;
+    END;
+    """
+    return db.execute_dml(sql, [id_punktu])
 
 # --- ODLEGLOSCI_MIEDZY_PUNKTAMI ---
 def get_odleglosci():
     return db.execute_query_df("SELECT id_pkt_od, id_pkt_do, odleglosc, przewyzszenie, czas_przejscia FROM odleglosci_miedzy_punktami ORDER BY id_pkt_od, id_pkt_do")
 
 def add_odleglosc(id_pkt_od, id_pkt_do, odleglosc, przewyzszenie, czas_przejscia):
+    if id_pkt_od == id_pkt_do:
+        return False, 'Punkty "od" i "do" muszą być różne.'
+    if not _is_positive_number(odleglosc):
+        return False, 'Pole "odleglosc" musi być dodatnią liczbą.'
+    if czas_przejscia is not None and not _is_positive_number(czas_przejscia):
+        return False, 'Pole "czas_przejscia" musi być dodatnią liczbą.'
     sql = "INSERT INTO odleglosci_miedzy_punktami (id_pkt_od, id_pkt_do, odleglosc, przewyzszenie, czas_przejscia) VALUES (:1, :2, :3, :4, :5)"
     return db.execute_dml(sql, [id_pkt_od, id_pkt_do, odleglosc, przewyzszenie, czas_przejscia])
 
 def update_odleglosc(id_pkt_od, id_pkt_do, odleglosc, przewyzszenie, czas_przejscia):
+    if id_pkt_od == id_pkt_do:
+        return False, 'Punkty "od" i "do" muszą być różne.'
+    if not _is_positive_number(odleglosc):
+        return False, 'Pole "odleglosc" musi być dodatnią liczbą.'
+    if czas_przejscia is not None and not _is_positive_number(czas_przejscia):
+        return False, 'Pole "czas_przejscia" musi być dodatnią liczbą.'
     sql = "UPDATE odleglosci_miedzy_punktami SET odleglosc = :1, przewyzszenie = :2, czas_przejscia = :3 WHERE id_pkt_od = :4 AND id_pkt_do = :5"
     return db.execute_dml(sql, [odleglosc, przewyzszenie, czas_przejscia, id_pkt_od, id_pkt_do])
 
@@ -410,6 +547,11 @@ def get_kolejnosci():
     return db.execute_query_df("SELECT id_szlaku_kol, id_punktu, kolejnosc_na_szlaku FROM kolejnosci ORDER BY id_szlaku_kol, kolejnosc_na_szlaku")
 
 def add_kolejnosc(id_szlaku_kol, id_punktu, kolejnosc_na_szlaku):
+    try:
+        if int(kolejnosc_na_szlaku) <= 0:
+            return False, 'Pole "kolejnosc_na_szlaku" musi być dodatnią liczbą.'
+    except Exception:
+        return False, 'Nieprawidłowa wartość "kolejnosc_na_szlaku".'
     sql = "INSERT INTO kolejnosci (id_szlaku_kol, id_punktu, kolejnosc_na_szlaku) VALUES (:1, :2, :3)"
     return db.execute_dml(sql, [id_szlaku_kol, id_punktu, kolejnosc_na_szlaku])
 
