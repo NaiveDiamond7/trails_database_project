@@ -4,11 +4,9 @@ import warnings
 import os
 
 warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
-# Wylaczamy ostrzezenia Pandas dotyczace SQLAlchemy, ktore nie sa istotne w tym kontekscie.
 
 os.environ["NLS_LANG"] = "POLISH_POLAND.AL32UTF8"
 
-# Konfiguracja Docker
 DB_CONFIG = {
     "user": "system",
     "password": "Test123",

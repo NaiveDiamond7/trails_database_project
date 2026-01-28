@@ -33,20 +33,21 @@ def get_schroniska_view():
     """
     return db.execute_query_df(sql)
 
-def add_schronisko_transaction(id_region, nazwa, wysokosc, otwarcie, zamkniecie):
+def add_schronisko_transaction(id_region, nazwa, wysokosc, otwarcie, zamkniecie, dlugosc=0, szerokosc=0):
     sql = """
     DECLARE
         v_id NUMBER;
     BEGIN
         INSERT INTO punkty (id_regionu, nazwa, typ, wysokosc, wspolrzedne_dlugosc, wspolrzedne_szerokosc)
-        VALUES (:reg_id, :nazwa, 'Schronisko', :wys, 0, 0)
+        VALUES (:1, :2, 'Schronisko', :3, :4, :5)
         RETURNING id_punktu INTO v_id;
 
         INSERT INTO schroniska (id_schroniska, id_regionu, nazwa, wysokosc, godzina_otwarcia, godzina_zamkniecia)
-        VALUES (v_id, :reg_id, :nazwa, :wys, :godz_otw, :godz_zam);
+        VALUES (v_id, :1, :2, :3, :6, :7);
     END;
     """
-    params = [id_region, nazwa, wysokosc, otwarcie, zamkniecie]
+    # binding order: id_region, nazwa, wysokosc, dlugosc, szerokosc, otwarcie, zamkniecie
+    params = [id_region, nazwa, wysokosc, dlugosc, szerokosc, otwarcie, zamkniecie]
     return db.execute_dml(sql, params)
 
 def update_schronisko(id_schroniska, id_regionu, nazwa, wysokosc, otwarcie, zamkniecie):
@@ -208,7 +209,6 @@ def add_szlak(id_regionu, nazwa, kolor, trudnosc, dlugosc, czas):
 
 def update_szlak(id_szlaku, nazwa, kolor, trudnosc, dlugosc, czas):
     sql = """
-        # --- ODLEGLOSCI_MIEDZY_PUNKTAMI ---
         UPDATE szlaki 
         SET nazwa = :1, kolor = :2, trudnosc = :3, dlugosc = :4, czas_przejscia = :5
         WHERE id_szlaku = :6
