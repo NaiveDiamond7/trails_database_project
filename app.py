@@ -3,6 +3,8 @@ def view_kolejnosci_manager():
 
     if 'kol_add_success' not in st.session_state:
         st.session_state['kol_add_success'] = False
+    if 'kol_tab' not in st.session_state:
+        st.session_state['kol_tab'] = 0
     if st.session_state.get('kol_add_success'):
         st.success("Dodano kolejność.")
         st.session_state['kol_add_success'] = False
@@ -28,9 +30,9 @@ def view_kolejnosci_manager():
             df_display['SZLAK'] = df_display['ID_SZLAKU_KOL'].map(szlaki_rev).fillna(df_display['ID_SZLAKU_KOL'])
             df_display['PUNKT'] = df_display['ID_PUNKTU'].map(punkty_rev).fillna(df_display['ID_PUNKTU'])
             cols = ['ID_SZLAKU_KOL', 'SZLAK', 'PUNKT', 'KOLEJNOSC_NA_SZLAKU']
-            st.dataframe(df_display[cols], width="stretch")
+            st.dataframe(sort_df_by_id(df_display)[cols], width="stretch")
         else:
-            st.dataframe(df, width="stretch")
+            st.dataframe(sort_df_by_id(df), width="stretch")
 
         opts = {}
         for i, row in df.iterrows():
@@ -59,6 +61,7 @@ def view_kolejnosci_manager():
                 id_punktu = punkty_map[sel_punkt]
                 success, msg = crud.add_kolejnosc(id_szlaku, id_punktu, kolejnosc)
                 if success:
+                    st.session_state['kol_tab'] = 0
                     st.session_state['kol_add_success'] = True
                     safe_rerun()
                 else:
@@ -81,7 +84,7 @@ def view_wyposazenie_manager():
 
     with tab1:
         df = crud.get_wyposazenia()
-        st.dataframe(df, width="stretch")
+        st.dataframe(sort_df_by_id(df), width="stretch")
 
         st.subheader("Edycja wyposażenia")
         opts = {row['NAZWA']: row['ID_WYPOSAZENIA'] for i, row in df.iterrows()}
@@ -116,7 +119,7 @@ def view_wyposazenie_manager():
                 if success:
                     st.session_state['wyposazenie_tab'] = 0
                     st.session_state['wyposazenie_add_success'] = True
-                    st.rerun()
+                    safe_rerun()
                 else:
                     st.error(msg)
 
@@ -133,7 +136,7 @@ def view_wyposazenie_manager():
             sch_wyposazenie = crud.get_schroniska_wyposazenie(sch_id)
             all_wyp = crud.get_wyposazenia()
             st.write("Aktualne wyposażenie:")
-            st.dataframe(sch_wyposazenie, width="stretch")
+            st.dataframe(sort_df_by_id(sch_wyposazenie), width="stretch")
             add_opts = {row['NAZWA']: row['ID_WYPOSAZENIA'] for i, row in all_wyp.iterrows() if row['ID_WYPOSAZENIA'] not in sch_wyposazenie['ID_WYPOSAZENIA'].values}
             del_opts = {row['NAZWA']: row['ID_WYPOSAZENIA'] for i, row in sch_wyposazenie.iterrows()}
             c1, c2 = st.columns(2)
@@ -147,11 +150,12 @@ def view_wyposazenie_manager():
                             success, msg = crud.add_schronisko_wyposazenie(sch_id, add_opts[sel_add])
                             if success:
                                 st.success(msg)
-                                st.rerun()
+                            if success:
+                                st.session_state['punkty_tab'] = 0
+                                st.session_state['punkty_add_success'] = True
+                                safe_rerun()
                             else:
-                                st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
-            with c2:
-                sel_del = st.selectbox("Usuń wyposażenie", ["-- Wybierz --"] + list(del_opts.keys()), key="delschwyp")
+                                st.error(msg)
                 if sel_del != "-- Wybierz --":
                     if st.button("Usuń ze schroniska"):
                         if not del_opts[sel_del]:
@@ -173,7 +177,7 @@ def view_wyposazenie_manager():
             pok_wyp = crud.get_pokoje_wyposazenie(pok_id)
             all_wyp = crud.get_wyposazenia()
             st.write("Aktualne wyposażenie pokoju:")
-            st.dataframe(pok_wyp, width="stretch")
+            st.dataframe(sort_df_by_id(pok_wyp), width="stretch")
             add_opts = {row['NAZWA']: row['ID_WYPOSAZENIA'] for i, row in all_wyp.iterrows() if row['ID_WYPOSAZENIA'] not in pok_wyp['ID_WYPOSAZENIA'].values}
             del_opts = {row['NAZWA']: row['ID_WYPOSAZENIA'] for i, row in pok_wyp.iterrows()}
             c1, c2 = st.columns(2)
@@ -216,11 +220,33 @@ def safe_rerun():
         except Exception:
             return st.stop()
 
+
+def sort_df_by_id(df):
+    """Return df sorted by the first column starting with 'ID_' if present."""
+    try:
+        if df is None or getattr(df, 'empty', True):
+            return df
+        cols = [c for c in df.columns if isinstance(c, str) and c.upper().startswith('ID_')]
+        if cols:
+            return df.sort_values(by=cols[0])
+    except Exception:
+        pass
+    return df
+
 def view_regiony():
     st.header("Zarządzanie Regionami")
 
+    if 'regiony_tab' not in st.session_state:
+        st.session_state['regiony_tab'] = 0
+    if 'region_add_success' not in st.session_state:
+        st.session_state['region_add_success'] = False
+
+    if st.session_state.get('region_add_success'):
+        st.success("Dodano region.")
+        st.session_state['region_add_success'] = False
+
     df = crud.get_regiony()
-    st.dataframe(df, width="stretch")
+    st.dataframe(sort_df_by_id(df), width="stretch")
 
     with st.expander("Dodaj nowy region"):
         with st.form("add_region"):
@@ -228,8 +254,9 @@ def view_regiony():
             if st.form_submit_button("Zapisz"):
                 success, msg = crud.add_region(new_name)
                 if success:
-                    st.success(msg)
-                    st.rerun()
+                    st.session_state['regiony_tab'] = 0
+                    st.session_state['region_add_success'] = True
+                    safe_rerun()
                 else:
                     st.error(msg)
 
@@ -273,7 +300,7 @@ def view_schroniska():
         if search:
             df = df[df['NAZWA'].str.contains(search, case=False)]
 
-        st.dataframe(df, width="stretch")
+        st.dataframe(sort_df_by_id(df), width="stretch")
 
         st.subheader("Edycja Schroniska")
         opts = {f"{row['NAZWA']}": row['ID_SCHRONISKA'] for i, row in df.iterrows()}
@@ -363,12 +390,12 @@ def view_schroniska():
                     if success:
                         st.session_state['schroniska_tab'] = 0
                         st.session_state['schronisko_add_success'] = True
-                        st.rerun()
+                        safe_rerun()
                     else:
                         st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
                 if success:
                     st.success("Dodano!")
-                    st.rerun()
+                    safe_rerun()
                 else:
                     st.error(msg)
 
@@ -465,7 +492,7 @@ def view_rezerwacje():
         if df_rez.empty:
             st.info("Brak rezerwacji w systemie.")
         else:
-            st.dataframe(df_rez, width="stretch")
+            st.dataframe(sort_df_by_id(df_rez), width="stretch")
 
             opts = {}
             for i, row in df_rez.iterrows():
@@ -549,7 +576,11 @@ def view_szlaki_manager():
                 df = df[df['NAZWA'].str.contains(search, case=False)]
             
             cols_to_show = ['ID_SZLAKU', 'REGION', 'NAZWA', 'KOLOR_WYSWIETLANY', 'TRUDNOSC_WYSWIETLANA', 'DLUGOSC', 'CZAS_PRZEJSCIA']
-            st.dataframe(df[cols_to_show], width="stretch")
+            df_show = df[cols_to_show].rename(columns={
+                'KOLOR_WYSWIETLANY': 'KOLOR',
+                'TRUDNOSC_WYSWIETLANA': 'TRUDNOŚĆ'
+            })
+            st.dataframe(sort_df_by_id(df_show), width="stretch")
         else:
             st.info("Brak szlaków w bazie.")
 
@@ -654,7 +685,7 @@ def view_pokoje_manager():
             df_display = df
         with col_info:
             st.info(f"Znaleziono: {len(df_display)}")
-        st.dataframe(df_display, width="stretch")
+        st.dataframe(sort_df_by_id(df_display), width="stretch")
         st.markdown("---")
         st.subheader("🛠️ Edycja / Usuwanie")
         record_options = {
@@ -706,7 +737,7 @@ def view_pokoje_manager():
                 if success:
                     st.session_state['pokoje_tab'] = 0
                     st.session_state['pokoj_add_success'] = True
-                    st.rerun()
+                    safe_rerun()
                 else:
                     st.error(msg if 'Błąd:' in msg else f"Błąd: {msg}")
 
@@ -737,7 +768,7 @@ def view_uzytkownicy_manager():
                    df['NAZWISKO'].str.contains(search, case=False)
             df = df[mask]
         
-        st.dataframe(df, width="stretch")
+        st.dataframe(sort_df_by_id(df), width="stretch")
 
         st.subheader("Edycja Użytkownika")
         
@@ -805,9 +836,7 @@ def view_uzytkownicy_manager():
                 else:
                     success, msg = crud.add_user(n_login, n_haslo, ROLA_MAP[n_rola], n_imie, n_nazwisko, n_email)
                     if success:
-                        st.session_state['uzytkownicy_tab'] = 0
-                        st.session_state['uzytkownik_add_success'] = True
-                        st.rerun()
+                        st.success("Użytkownik zarejestrowany pomyślnie!")
                     else:
                         st.error(msg)
 
@@ -843,6 +872,8 @@ def view_punkty_manager():
     st.header("🗺️ Zarządzanie Punktami")
     if 'punkty_add_success' not in st.session_state:
         st.session_state['punkty_add_success'] = False
+    if 'punkty_tab' not in st.session_state:
+        st.session_state['punkty_tab'] = 0
     if st.session_state['punkty_add_success']:
         st.success("Dodano punkt.")
         st.session_state['punkty_add_success'] = False
@@ -868,9 +899,9 @@ def view_punkty_manager():
             df_display['REGION'] = df_display['ID_REGIONU'].map(region_rev).fillna(df_display['ID_REGIONU'])
             cols = ['ID_PUNKTU', 'NAZWA', 'REGION', 'TYP', 'WYSOKOSC', 'WSPOLRZEDNE_DLUGOSC', 'WSPOLRZEDNE_SZEROKOSC']
             available = [c for c in cols if c in df_display.columns]
-            st.dataframe(df_display[available], width="stretch")
+            st.dataframe(sort_df_by_id(df_display)[available], width="stretch")
         else:
-            st.dataframe(df, width="stretch")
+            st.dataframe(sort_df_by_id(df), width="stretch")
 
         opts = {f"{row['NAZWA']} (ID: {row['ID_PUNKTU']})": row['ID_PUNKTU'] for i, row in df.iterrows()}
         sel = st.selectbox("Wybierz punkt", ["-- Wybierz --"] + list(opts.keys()))
@@ -905,6 +936,7 @@ def view_punkty_manager():
                 else:
                     success, msg = crud.add_punkt(id_regionu, nazwa, typ, wysokosc, dlugosc, szerokosc)
                 if success:
+                    st.session_state['punkty_tab'] = 0
                     st.session_state['punkty_add_success'] = True
                     safe_rerun()
                 else:
@@ -914,6 +946,8 @@ def view_odleglosci_manager():
     st.header("↔️ Odległości między punktami")
     if 'odl_add_success' not in st.session_state:
         st.session_state['odl_add_success'] = False
+    if 'odl_tab' not in st.session_state:
+        st.session_state['odl_tab'] = 0
     if st.session_state['odl_add_success']:
         st.success("Dodano odległość.")
         st.session_state['odl_add_success'] = False
@@ -930,9 +964,9 @@ def view_odleglosci_manager():
             df_display['PUNKT_DO'] = df_display['ID_PKT_DO'].map(punkty_rev).fillna(df_display['ID_PKT_DO'])
             cols = ['PUNKT_OD', 'PUNKT_DO', 'ODLEGLOSC', 'PRZEWYSZENIE', 'CZAS_PRZEJSCIA']
             available = [c for c in cols if c in df_display.columns]
-            st.dataframe(df_display[available], width="stretch")
+            st.dataframe(sort_df_by_id(df_display)[available], width="stretch")
         else:
-            st.dataframe(df, width="stretch")
+            st.dataframe(sort_df_by_id(df), width="stretch")
         opts = {}
         for i, row in df.iterrows():
             od = punkty_rev.get(row['ID_PKT_OD'], row['ID_PKT_OD'])
@@ -964,6 +998,7 @@ def view_odleglosci_manager():
                 id_do = punkty_map[sel_do]
                 success, msg = crud.add_odleglosc(id_od, id_do, odl, przew, czas)
                 if success:
+                    st.session_state['odl_tab'] = 0
                     st.session_state['odl_add_success'] = True
                     safe_rerun()
                 else:

@@ -1,11 +1,12 @@
+import os
+# Ensure NLS_LANG is set before loading Oracle client so encoding is configured early
+os.environ["NLS_LANG"] = "POLISH_POLAND.AL32UTF8"
+
 import oracledb
 import pandas as pd
 import warnings
-import os
 
 warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
-
-os.environ["NLS_LANG"] = "POLISH_POLAND.AL32UTF8"
 
 DB_CONFIG = {
     "user": "system",
@@ -31,7 +32,30 @@ def execute_dml(query, params):
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(query, params)
+        # Normalize params to native Python types (avoid numpy.int64 / pandas types)
+        if params:
+            norm_params = []
+            for p in params:
+                # numpy / pandas scalar handling
+                try:
+                    # pandas Timestamp -> python datetime
+                    import pandas as _pd
+                    if isinstance(p, _pd.Timestamp):
+                        norm_params.append(p.to_pydatetime())
+                        continue
+                except Exception:
+                    pass
+                try:
+                    # numpy scalar types (int64, float64, etc.) have .item()
+                    if hasattr(p, 'item') and callable(p.item):
+                        norm_params.append(p.item())
+                        continue
+                except Exception:
+                    pass
+                norm_params.append(p)
+            cursor.execute(query, norm_params)
+        else:
+            cursor.execute(query, params)
         conn.commit()
         return True, "Operacja zakończona sukcesem."
     except Exception as e:
