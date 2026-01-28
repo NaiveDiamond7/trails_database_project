@@ -2,7 +2,6 @@
 def view_kolejnosci_manager():
     st.header("🔢 Kolejności punktów na szlakach")
 
-    # session state for unified success behavior
     if 'kol_add_success' not in st.session_state:
         st.session_state['kol_add_success'] = False
     if st.session_state.get('kol_add_success'):
@@ -10,16 +9,15 @@ def view_kolejnosci_manager():
         st.session_state['kol_add_success'] = False
 
     df = crud.get_kolejnosci()
-    # maps for friendly names
+
     szlaki_df = crud.get_szlaki()
     szlaki_rev = {row['ID_SZLAKU']: row['NAZWA'] for i, row in szlaki_df.iterrows()}
-    # map for selectbox (label -> id)
+
     szlaki_map = {f"{row['NAZWA']} (ID: {row['ID_SZLAKU']})": row['ID_SZLAKU'] for i, row in szlaki_df.iterrows()}
     punkty_df = crud.get_punkty()
     punkty_rev = {row['ID_PUNKTU']: row['NAZWA'] for i, row in punkty_df.iterrows()}
     punkty_map = {f"{row['NAZWA']} (ID: {row['ID_PUNKTU']})": row['ID_PUNKTU'] for i, row in punkty_df.iterrows()}
 
-    # Friendly display table
     if not df.empty:
         df_display = df.copy()
         df_display['SZLAK'] = df_display['ID_SZLAKU_KOL'].map(szlaki_rev).fillna(df_display['ID_SZLAKU_KOL'])
@@ -43,7 +41,6 @@ def view_kolejnosci_manager():
                 else:
                     st.error(msg)
     with st.expander("Usuń kolejność"):
-        # build friendly options
         opts = {}
         for i, row in df.iterrows():
             sname = szlaki_rev.get(row['ID_SZLAKU_KOL'], row['ID_SZLAKU_KOL'])
@@ -60,6 +57,7 @@ def view_kolejnosci_manager():
                     safe_rerun()
                 else:
                     st.error(msg)
+
 def view_rezerwacje_manager():
     st.header("🗂️ Zarządzanie rezerwacjami")
     df = crud.get_all_reservations()
@@ -78,10 +76,10 @@ def view_rezerwacje_manager():
                 st.rerun()
             else:
                 st.error(msg)
+
 def view_wyposazenie_manager():
     st.header("🛠️ Zarządzanie Wyposażeniem")
 
-    # session state dla zakładek i komunikatów
     if 'wyposazenie_tab' not in st.session_state:
         st.session_state['wyposazenie_tab'] = 0
     if 'wyposazenie_add_success' not in st.session_state:
@@ -89,13 +87,11 @@ def view_wyposazenie_manager():
 
     tab1, tab2 = st.tabs(["📋 Lista i Edycja", "➕ Dodaj nowe wyposażenie"])
 
-    # pokaż komunikat sukcesu po dodaniu
     if st.session_state.get('wyposazenie_add_success'):
         with tab1:
             st.success("Dodano wyposażenie.")
         st.session_state['wyposazenie_add_success'] = False
 
-    # --- Tabela i edycja ---
     with tab1:
         df = crud.get_wyposazenia()
         st.dataframe(df, width="stretch")
@@ -124,7 +120,6 @@ def view_wyposazenie_manager():
                     else:
                         st.error(msg)
 
-    # --- Dodawanie ---
     with tab2:
         st.subheader("Dodaj nowe wyposażenie")
         with st.form("add_wyposazenie_form"):
@@ -142,7 +137,6 @@ def view_wyposazenie_manager():
     st.header("🔗 Przypisz wyposażenie do schroniska/pokoju")
     tab3, tab4 = st.tabs(["Schroniska", "Pokoje"])
 
-    # --- Schroniska ---
     with tab3:
         schroniska = crud.get_schroniska_view()
         sch_map = {row['NAZWA']: row['ID_SCHRONISKA'] for i, row in schroniska.iterrows()}

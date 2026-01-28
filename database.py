@@ -38,7 +38,6 @@ def execute_dml(query, params):
         return True, "Operacja zakończona sukcesem."
     except Exception as e:
         msg = str(e)
-        # Typowe błędy Oracle
         if "ORA-00001" in msg:
             return False, "Taki wpis już istnieje. Zmień dane lub wybierz inną nazwę."
         if "ORA-02292" in msg:
@@ -51,7 +50,6 @@ def execute_dml(query, params):
             return False, "Pole wymagane nie może być puste. Uzupełnij wszystkie wymagane pola."
         if "ORA-01438" in msg:
             return False, "Wartość liczby jest za duża dla tego pola."
-        # Inne
         return False, f"Błąd: {msg.split(':')[-1].strip()}"
     finally:
         cursor.close()
@@ -92,7 +90,7 @@ def execute_function(name, return_type, params):
         return cursor.callfunc(name, return_type, params)
     except Exception as e:
         msg = str(e)
-        # Można dodać obsługę typowych błędów jak wyżej, jeśli funkcje będą zwracać błędy
+
         return None
     finally:
         cursor.close()

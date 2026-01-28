@@ -1,4 +1,8 @@
-# --- ROOM RESERVATIONS (for calendar view) ---
+import database as db
+import oracledb
+import pandas as pd
+
+# --- REZERWACJE ---
 def get_room_reservations(id_pokoju):
     sql = """
         SELECT data_rozpoczecia, data_zakonczenia
@@ -7,8 +11,6 @@ def get_room_reservations(id_pokoju):
         ORDER BY data_rozpoczecia
     """
     return db.execute_query_df(sql, [id_pokoju])
-import database as db
-import oracledb
 
 # --- REGIONY ---
 def get_regiony():
@@ -89,12 +91,7 @@ def calculate_cost(id_pokoju, start, end, osoby):
     return db.execute_function("oblicz_koszt_pobytu", oracledb.NUMBER, [id_pokoju, start, end, osoby])
 
 def make_reservation(id_pokoju, id_user, osoby, start, end):
-    """
-    Tworzy rezerwację w MODELU HOTELOWYM (Na wyłączność).
-    Jeśli pokój jest zajęty, zwraca informację, kiedy się zwolni.
-    """
-    
-    # 1. Sprawdzenie pojemności (Czy pokój w ogóle mieści tyle osób?)
+
     cap_sql = "SELECT liczba_miejsc_calkowita FROM pokoje WHERE id_pokoju = :1"
     cap_df = db.execute_query_df(cap_sql, [id_pokoju])
     if cap_df.empty:
@@ -103,8 +100,6 @@ def make_reservation(id_pokoju, id_user, osoby, start, end):
     if osoby > max_cap:
         return False, f"Ten pokój mieści maksymalnie {max_cap} osób. Chcesz zarezerwować dla {osoby}."
 
-    # 2. Sprawdzenie sumy osób na każdy dzień
-    import pandas as pd
     res_sql = """
         SELECT data_rozpoczecia, data_zakonczenia, liczba_osob
         FROM rezerwacje
@@ -122,8 +117,6 @@ def make_reservation(id_pokoju, id_user, osoby, start, end):
         if occ + osoby > max_cap:
             return False, "Wybrany termin przekracza pojemność pokoju w niektóre dni!"
 
-    # 3. Jeśli czysto -> Rezerwujemy (współdzielenie, bez zmiany liczba_miejsc_wolnych)
-    # Oblicz koszt
     koszt = db.execute_function("oblicz_koszt_pobytu", oracledb.NUMBER, [id_pokoju, start, end, osoby])
     if koszt is None:
         return False, "Nie można obliczyć kosztu pobytu."
@@ -227,10 +220,7 @@ def delete_szlak(id_szlaku):
 
 # --- POKOJE ---
 def get_pokoje_full():
-    """
-    Pobiera pokoje oraz dynamicznie oblicza, ile osób mieszka w nich DZISIAJ.
-    """
-        # --- KOLEJNOSCI ---
+
     sql = """
         SELECT p.id_pokoju, 
                s.nazwa as schronisko, 
@@ -289,7 +279,7 @@ def add_pokoj(id_schroniska, nr_pokoju, miejsca, cena):
         BEGIN
             EXECUTE IMMEDIATE 'UPDATE pokoje SET liczba_miejsc_wolnych = :1 WHERE id_schroniska = :2 AND nr_pokoju = :3' USING v_m, v_id_s, v_nr;
         EXCEPTION WHEN OTHERS THEN
-            NULL; -- jeżeli kolumna nie istnieje w schemacie, ignoruj
+            NULL;
         END;
     END;
     """
@@ -340,7 +330,6 @@ def update_wyposazenie(id_wyposazenia, nazwa):
 def delete_wyposazenie(id_wyposazenia):
     return db.execute_dml("DELETE FROM wyposazenia WHERE id_wyposazenia = :1", [id_wyposazenia])
 
-# --- SCHRONISKA_WYPOSAŻENIE ---
 def get_schroniska_wyposazenie(id_schroniska):
     sql = """
         SELECT w.id_wyposazenia, w.nazwa
@@ -357,7 +346,6 @@ def add_schronisko_wyposazenie(id_schroniska, id_wyposazenia):
 def delete_schronisko_wyposazenie(id_schroniska, id_wyposazenia):
     return db.execute_dml("DELETE FROM schroniska_wyposazenie WHERE id_schroniska = :1 AND id_wyposazenia = :2", [id_schroniska, id_wyposazenia])
 
-# --- POKOJE_WYPOSAŻENIE ---
 def get_pokoje_wyposazenie(id_pokoju):
     sql = """
         SELECT w.id_wyposazenia, w.nazwa
